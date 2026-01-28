@@ -1,11 +1,16 @@
 <script>
   import { onMount, onDestroy } from "svelte";
   import { API_BASE_URL } from "../lib/config.js";
+  import SensorCard from "../components/SensorCard.svelte";
 
   let sensors = [];
   let loading = true;
   let error = null;
   let intervalId = null;
+  
+  // Historique des valeurs pour chaque capteur (max 30 points = 150 secondes)
+  let sensorHistory = {};
+  const MAX_HISTORY = 30;
 
   async function fetchSensors() {
     try {
@@ -15,6 +20,24 @@
       }
       const data = await response.json();
       sensors = data.sensors || [];
+      
+      // Mettre à jour l'historique pour chaque capteur
+      sensors.forEach(sensor => {
+        const value = parseFloat(sensor.value);
+        
+        if (!sensorHistory[sensor.name]) {
+          // Initialiser avec la première valeur dupliquée pour avoir au moins 2 points
+          sensorHistory[sensor.name] = [value, value];
+        } else {
+          sensorHistory[sensor.name].push(value);
+          
+          // Limiter la taille de l'historique
+          if (sensorHistory[sensor.name].length > MAX_HISTORY) {
+            sensorHistory[sensor.name].shift();
+          }
+        }
+      });
+      
       error = null;
     } catch (e) {
       error = e.message;
@@ -37,35 +60,6 @@
       clearInterval(intervalId);
     }
   });
-
-  function getUnitSymbol(unit) {
-    switch (unit) {
-      case "Temperature":
-        return "°C";
-      case "Percent":
-        return "%";
-      default:
-        return "";
-    }
-  }
-
-  function getColorClass(unit, value) {
-    const numValue = parseFloat(value);
-    
-    if (unit === "Temperature") {
-      if (numValue >= 80) return "text-red-600";
-      if (numValue >= 60) return "text-orange-500";
-      return "text-green-600";
-    }
-    
-    if (unit === "Percent") {
-      if (numValue >= 90) return "text-red-600";
-      if (numValue >= 70) return "text-orange-500";
-      return "text-green-600";
-    }
-    
-    return "text-gray-800";
-  }
 </script>
 
 <div>
@@ -86,18 +80,11 @@
     </div>
   {:else}
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {#each sensors as sensor}
-        <div class="bg-white rounded-lg shadow p-4 border border-gray-200 hover:shadow-md transition-shadow">
-          <h3 class="text-sm font-medium text-gray-600 mb-2">{sensor.name}</h3>
-          <div class="flex items-baseline space-x-1">
-            <span class="text-3xl font-bold {getColorClass(sensor.unit, sensor.value)}">
-              {sensor.value}
-            </span>
-            <span class="text-lg text-gray-500">
-              {getUnitSymbol(sensor.unit)}
-            </span>
-          </div>
-        </div>
+      {#each sensors as sensor (sensor.name)}
+        <SensorCard 
+          sensor={sensor} 
+          history={sensorHistory[sensor.name] || []}
+        />
       {/each}
     </div>
   {/if}

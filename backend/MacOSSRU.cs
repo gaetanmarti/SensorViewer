@@ -9,10 +9,19 @@ namespace immensive;
 
 public class MacOSSystemResourceUsage: SystemResourceUsage
 {
+    protected class TemperatureSensorWithCode : TemperatureSensor
+    {
+        public string SmcCode { get; set; }
+        public TemperatureSensorWithCode(string name, string smcCode) : base(name)
+        {
+            SmcCode = smcCode;
+        }
+    }
+
     protected PercentSensor cpuUsageSensor = new("CPU Usage");
     protected PercentSensor ramUsageSensor = new("RAM Usage");
 
-    protected List<TemperatureSensor> temperatureSensors = new ();
+    protected List<TemperatureSensorWithCode> temperatureSensors = new ();
 
     protected const string smcPath = "/Applications/Stats.app/Contents/Resources/smc";
 
@@ -81,7 +90,7 @@ public class MacOSSystemResourceUsage: SystemResourceUsage
                     float temperature = smcInvalidTemperature;
                     if (float.TryParse(temperatures[sensor.Key], NumberStyles.Float, CultureInfo.InvariantCulture, out temperature) &&
                         temperature != smcInvalidTemperature)
-                        temperatureSensors.Add(new TemperatureSensor(sensor.Value) { Value = temperature });
+                        temperatureSensors.Add(new TemperatureSensorWithCode(sensor.Value, sensor.Key) { Value = temperature });
                 }
             }
             foreach (var sensor in temperatureSensors)
@@ -140,10 +149,11 @@ public class MacOSSystemResourceUsage: SystemResourceUsage
             Dictionary<string,string> temperatures = GetSMCTemperatures();
             foreach (var sensor in temperatureSensors)
             {
-                if (temperatures.ContainsKey(sensor.Name))
+                if (temperatures.ContainsKey(sensor.SmcCode))
                 {
                     float temperature = smcInvalidTemperature;
-                    if (float.TryParse(temperatures[sensor.Name], NumberStyles.Float, CultureInfo.InvariantCulture, out temperature))
+                    if (float.TryParse(temperatures[sensor.SmcCode], NumberStyles.Float, CultureInfo.InvariantCulture, out temperature) &&
+                        temperature != smcInvalidTemperature)
                         sensor.Value = temperature;
                 }
             }
