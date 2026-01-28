@@ -8,7 +8,11 @@ namespace immensive;
 public abstract class SystemResourceUsage
 {
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public enum Unit { None, Percent, Temperature }
+    public enum Unit { 
+        None,
+        Percent, 
+        Temperature
+    }
     
     public class Sensor
     {

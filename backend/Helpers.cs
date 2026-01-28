@@ -1,4 +1,3 @@
-using Newtonsoft.Json;
 using System.Reflection;
 using System.Runtime.Serialization;
 
@@ -18,14 +17,12 @@ public static class EnumExtensions
 
 public class ErrorResponse
 {
-    [JsonProperty("error")]
     [System.Text.Json.Serialization.JsonPropertyName("error")]
     public required string Error { get; set; }
 }
 
 public class OkResponse(bool ok = true)
 {
-    [JsonProperty("ok")]
     [System.Text.Json.Serialization.JsonPropertyName("ok")]
     public bool Ok { get; set; } = ok;
 }

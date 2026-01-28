@@ -37,7 +37,6 @@ By default, the server runs on port **8080**.
 Options:
   -h, --help          Display help message
   -p, --port <port>   Specify the port to listen on (default: 8080)
-  --dev               Start application in development mode
 ```
 
 > Note: Development mode uses alternate configuration for debug purposes.
@@ -65,41 +64,6 @@ Options:
 ## API Overview
 
 For detailed API documentation with request/response examples, see [API.md](API.md).
-
-### Quick API Reference
-
-#### Health Check
-```bash
-GET /api/alive
-```
-
-#### Get Sensor Data
-```bash
-GET /api/sensors
-```
-
-Returns JSON with all available sensors:
-```json
-{
-  "sensors": [
-    {
-      "name": "CPU Usage",
-      "unit": "Percent",
-      "value": "45.30"
-    },
-    {
-      "name": "RAM Usage",
-      "unit": "Percent",
-      "value": "68.50"
-    },
-    {
-      "name": "CPU Core 1",
-      "unit": "Temperature",
-      "value": "52.00"
-    }
-  ]
-}
-```
 
 ## Sensor Support
 

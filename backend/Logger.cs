@@ -1,12 +1,13 @@
-using Newtonsoft.Json;
-using Newtonsoft.Json.Converters;
-using Newtonsoft.Json.Serialization;
+using System.Runtime.InteropServices;
+using System.Diagnostics;
+using System.Globalization;
+using System.Text.Json.Serialization;
 
 namespace immensive;
 
 public class CustomLogger
 {
-    [JsonConverter(typeof(StringEnumConverter), typeof(CamelCaseNamingStrategy))]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum LogLevel
     {
         Info,
@@ -16,11 +17,10 @@ public class CustomLogger
 
     public class LoggerConfig
     {
-        [JsonProperty("level")]
-        [JsonConverter(typeof(StringEnumConverter))]
+        [JsonPropertyName("level")]
         public LogLevel Level { get; set; } = LogLevel.Info;
 
-        [JsonProperty("stdOut")]
+        [JsonPropertyName("stdOut")]
         public bool StdOut { get; set; } = true; 
     }
 

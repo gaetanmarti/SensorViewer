@@ -8,9 +8,5 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Management" Version="10.0.2" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="../../aquama-share/shared-csharp/shared-csharp.csproj" />
   </ItemGroup>
 </Project>

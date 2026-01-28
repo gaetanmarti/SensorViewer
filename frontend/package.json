@@ -1,0 +1,30 @@
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:backend": "vite build && yarn run copy:backend",
+    "copy:backend": "rm -rf ../backend/bin/Debug/net9.0/webapp && cp -r dist ../backend/bin/Debug/net9.0/webapp",
+    "preview": "vite preview",
+    "clean": "rm -rf dist",
+    "prebuild": "npm run clean"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^6.2.1",
+    "autoprefixer": "^10.4.22",
+    "daisyui": "^5.5.8",
+    "postcss": "^8.5.6",
+    "svelte": "^5.43.8",
+    "tailwindcss": "^3",
+    "vite": "^6.0.0"
+  },
+  "dependencies": {
+    "@tsconfig/svelte": "^5.0.6",
+    "svelte-check": "^4.3.4",
+    "typescript": "^5.9.3",
+    "zod": "^4.1.13"
+  }
+}
