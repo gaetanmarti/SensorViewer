@@ -1,0 +1,39 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "build",
+                "${workspaceFolder}/backend.csproj",
+                "/property:GenerateFullPaths=true",
+                "/consoleloggerparameters:NoSummary;ForceNoAlign"
+            ],
+            "problemMatcher": "$msCompile",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+		{
+            "label": "copy",
+            "type": "shell",
+            "command": "scp",
+            "args": [
+                "-r",
+                "${workspaceFolder}/bin/Debug/net9.0/*",
+                "admin@192.168.54.100:~/backend/"
+            ]
+        },
+        {
+            "label": "build and copy",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "build",
+                "copy"
+            ]
+        },
+    ]
+}

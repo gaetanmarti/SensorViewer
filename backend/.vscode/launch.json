@@ -1,0 +1,43 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Local Launch",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/bin/Debug/net9.0/backend.dll",
+            "args": [
+                "--dev",
+                "--dataPath", "${workspaceFolder}/../data"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "env": {
+                "ASPNETCORE_ENVIRONMENT": "Development"
+            },
+            "sourceFileMap": {
+                "/Views": "${workspaceFolder}/Views"
+            }
+        },
+        {
+            "name": "Remote Launch",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build and copy",
+            "program": "~/backend/backend.dll",
+            "args": [],
+            "cwd": "~/backend",
+            "stopAtEntry": false,
+            "console": "internalConsole",
+            "pipeTransport": {
+                "pipeCwd": "${workspaceRoot}",
+                "pipeProgram": "ssh",
+                "pipeArgs": [
+                    "admin@192.168.54.100"
+                ],
+                "debuggerPath": "~/vsdbg/vsdbg"
+            }
+        },
+    ]
+}
