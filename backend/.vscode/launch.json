@@ -34,7 +34,7 @@
                 "pipeCwd": "${workspaceRoot}",
                 "pipeProgram": "ssh",
                 "pipeArgs": [
-                    "admin@192.168.54.100"
+                    "pi@192.168.4.50"
                 ],
                 "debuggerPath": "~/vsdbg/vsdbg"
             }

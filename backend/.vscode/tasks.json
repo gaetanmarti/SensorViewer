@@ -24,7 +24,7 @@
             "args": [
                 "-r",
                 "${workspaceFolder}/bin/Debug/net9.0/*",
-                "admin@192.168.54.100:~/backend/"
+                "pi@192.168.4.50:~/backend/"
             ]
         },
         {

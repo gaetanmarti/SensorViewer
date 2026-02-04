@@ -90,12 +90,14 @@ public abstract class SystemResourceUsage
     {
         /*if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             return new WindowsSystemResourceUsage();
-        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        else */ 
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             return new LinuxSystemResourceUsage();
-        else*/ if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            return new MacOSSystemResourceUsage();
-        else
-            throw new NotSupportedException("Unsupported operating system.");
+        else 
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                return new MacOSSystemResourceUsage();
+            else
+                throw new NotSupportedException("Unsupported operating system.");
     }
 
     protected static string Shell (string command)

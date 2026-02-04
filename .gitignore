@@ -1,6 +1,10 @@
 # Mac specific
 .DS_Store
 
+# Yarn / npm temp files
+yarn.lock
+package-lock.json
+
 # Local database files
 database.db
 

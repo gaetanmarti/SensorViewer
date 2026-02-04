@@ -6,7 +6,7 @@ A simple web interface for monitoring PC and i2c sensors in real-time, built wit
 
 - **Framework**: Svelte 5
 - **Build Tool**: Vite 6
-- **Styling**: TailwindCSS 3
+- **Styling**: TailwindCSS 3v
 - **Language**: JavaScript
 
 ## Features
