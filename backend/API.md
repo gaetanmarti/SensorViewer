@@ -72,4 +72,38 @@ Return the sensor list with:
 
 ---
 
-GMA 2026-01-28
+### I2C Endpoints
+
+---
+
+#### `GET /api/i2c/devices`
+
+Detect and list all I2C devices connected on the bus.
+
+##### Response (200 OK):
+
+```json
+{
+  "ok": true,
+  "devices": [
+    { "address": 60, "name": "Unknown I2C Device" },
+    { "address": 72, "name": "Custom Sensor" }
+  ]
+}
+```
+
+Return the list of detected I2C devices with:
+- Address: I2C device address (decimal format)
+- Name: Device name (if registered) or "Unknown I2C Device"
+
+##### Example:
+
+```bash
+curl -X GET http://localhost:8080/api/i2c/devices
+
+{"ok":true,"devices":[{"address":60,"name":"Unknown I2C Device"}]}
+```
+
+---
+
+GMA 2026-02-04

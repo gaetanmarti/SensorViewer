@@ -49,7 +49,14 @@ public class Program
 
         app.MapGet("/api/sensors",  (HttpContext context) =>
             Global.Sensors.SensorsDelegate(context));
+
+        // =============
+        // i2c endpoints
+        // =============
         
+        app.MapGet("/api/i2c/devices",  (HttpContext context) =>
+            Global.ManagerI2C.DevicesDelegate(context));
+
         // ==================================
         // Root endpoint (for captive portal)
         // ==================================
