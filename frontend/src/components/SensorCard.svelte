@@ -1,111 +1,153 @@
 <script>
+  import { onMount, onDestroy } from "svelte";
+  import { Chart } from "chart.js/auto";
+
   export let sensor;
   export let history = [];
 
-  // Déterminer la couleur en fonction du type et de la valeur
-  function getStatusColor(sensor) {
-    const value = parseFloat(sensor.value);
-    const unit = sensor.unit.toLowerCase();
+  let canvas;
+  let chart;
 
-    if (unit === "°c") {
-      if (value >= 80) return "text-red-600";
-      if (value >= 60) return "text-orange-500";
-      return "text-green-600";
+  function getUnitSymbol(unit) {
+    switch (unit) {
+      case "Temperature":
+        return "°C";
+      case "Percent":
+        return "%";
+      default:
+        return "";
     }
-
-    if (unit === "%") {
-      if (value >= 90) return "text-red-600";
-      if (value >= 70) return "text-orange-500";
-      return "text-green-600";
-    }
-
-    return "text-gray-900";
   }
 
-  // Générer les points du graphique sparkline
-  function generateSparkline(history) {
-    if (!history || history.length < 2) return "";
+  function getColorClass(unit, value) {
+    const numValue = parseFloat(value);
+    
+    if (unit === "Temperature") {
+      if (numValue >= 80) return "text-red-600";
+      if (numValue >= 60) return "text-orange-500";
+      return "text-green-600";
+    }
+    
+    if (unit === "Percent") {
+      if (numValue >= 90) return "text-red-600";
+      if (numValue >= 70) return "text-orange-500";
+      return "text-green-600";
+    }
+    
+    return "text-gray-800";
+  }
 
-    const height = 40;
-    const width = 200;
-    const padding = 2;
+  function getChartColor(unit, value) {
+    const numValue = parseFloat(value);
+    
+    if (unit === "Temperature") {
+      if (numValue >= 80) return "rgba(220, 38, 38, 0.8)";
+      if (numValue >= 60) return "rgba(249, 115, 22, 0.8)";
+      return "rgba(22, 163, 74, 0.8)";
+    }
+    
+    if (unit === "Percent") {
+      if (numValue >= 90) return "rgba(220, 38, 38, 0.8)";
+      if (numValue >= 70) return "rgba(249, 115, 22, 0.8)";
+      return "rgba(22, 163, 74, 0.8)";
+    }
+    
+    return "rgba(59, 130, 246, 0.8)";
+  }
 
-    const min = Math.min(...history);
-    const max = Math.max(...history);
-    const range = max - min || 1; // Éviter division par zéro
+  function updateChart() {
+    if (!chart || !canvas) return;
 
-    const points = history.map((value, index) => {
-      const x = (index / (history.length - 1)) * width;
-      const y = height - ((value - min) / range) * (height - padding * 2) - padding;
-      return `${x},${y}`;
+    const color = getChartColor(sensor.unit, sensor.value);
+
+    chart.data.labels = Array(history.length).fill("");
+    chart.data.datasets[0].borderColor = color;
+    chart.data.datasets[0].backgroundColor = color.replace('0.8', '0.2');
+    chart.data.datasets[0].data = [...history]; // Clone array to trigger update
+    chart.update('none'); // Update without animation for smooth real-time feel
+  }
+
+  onMount(() => {
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    const color = getChartColor(sensor.unit, sensor.value);
+
+    chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: Array(history.length).fill(""),
+        datasets: [{
+          data: [...history],
+          borderColor: color,
+          backgroundColor: color.replace('0.8', '0.2'),
+          borderWidth: 2,
+          tension: 0.4,
+          pointRadius: 0,
+          fill: true,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { 
+            enabled: true,
+            callbacks: {
+              label: (context) => `${context.parsed.y.toFixed(2)} ${getUnitSymbol(sensor.unit)}`
+            }
+          }
+        },
+        scales: {
+          x: { display: false },
+          y: {
+            display: true,
+            position: 'right',
+            beginAtZero: sensor.unit === "Percent",
+            min: sensor.unit === "Percent" ? 0 : undefined,
+            max: sensor.unit === "Percent" ? 100 : undefined,
+            ticks: {
+              callback: (value) => `${value}${getUnitSymbol(sensor.unit)}`,
+              font: { size: 10 },
+              color: '#9CA3AF'
+            },
+            grid: {
+              color: 'rgba(156, 163, 175, 0.1)'
+            }
+          }
+        },
+        animation: false,
+      }
     });
+  });
 
-    return points.join(" ");
+  onDestroy(() => {
+    if (chart) {
+      chart.destroy();
+    }
+  });
+
+  $: if (chart && history && history.length > 0) {
+    updateChart();
   }
-
-  $: statusColor = getStatusColor(sensor);
-  $: sparklinePoints = generateSparkline(history);
 </script>
 
-<div class="bg-white rounded-lg shadow border border-gray-200 p-4 hover:shadow-md transition-shadow">
-  <div class="flex justify-between items-start mb-2">
-    <h3 class="text-sm font-medium text-gray-600 truncate pr-2" title={sensor.name}>
-      {sensor.name}
-    </h3>
-    <span class="text-xs text-gray-400">{sensor.type}</span>
-  </div>
-
-  <div class="flex items-baseline mb-3">
-    <span class="text-3xl font-bold {statusColor}">
-      {sensor.value}
-    </span>
-    <span class="text-lg text-gray-500 ml-1">
-      {sensor.unit}
-    </span>
-  </div>
-
-  {#if history && history.length >= 2}
-    <div class="mt-2">
-      <svg viewBox="0 0 200 40" class="w-full h-10" preserveAspectRatio="none">
-        <!-- Ligne de base -->
-        <line
-          x1="0"
-          y1="40"
-          x2="200"
-          y2="40"
-          stroke="#E5E7EB"
-          stroke-width="1"
-        />
-        
-        <!-- Polyline pour le graphique -->
-        <polyline
-          points={sparklinePoints}
-          fill="none"
-          stroke="#3B82F6"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        
-        <!-- Points aux extrémités -->
-        <circle
-          cx={0}
-          cy={sparklinePoints.split(" ")[0].split(",")[1]}
-          r="2"
-          fill="#3B82F6"
-        />
-        <circle
-          cx={200}
-          cy={sparklinePoints.split(" ")[sparklinePoints.split(" ").length - 1].split(",")[1]}
-          r="2"
-          fill="#3B82F6"
-        />
-      </svg>
-      
-      <div class="flex justify-between text-xs text-gray-400 mt-1">
-        <span>-{(history.length - 1) * 5}s</span>
-        <span>maintenant</span>
-      </div>
+<div class="bg-white rounded-lg shadow p-4 border border-gray-200 hover:shadow-md transition-shadow">
+  <h3 class="text-sm font-medium text-gray-600 mb-2">{sensor.name}</h3>
+  
+  <div class="flex items-center justify-between mb-3">
+    <div class="flex items-baseline space-x-1">
+      <span class="text-3xl font-bold {getColorClass(sensor.unit, sensor.value)}">
+        {sensor.value}
+      </span>
+      <span class="text-lg text-gray-500">
+        {getUnitSymbol(sensor.unit)}
+      </span>
     </div>
-  {/if}
+  </div>
+
+  <div class="h-16">
+    <canvas bind:this={canvas}></canvas>
+  </div>
 </div>
