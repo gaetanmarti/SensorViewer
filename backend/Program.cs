@@ -157,6 +157,18 @@ public class Program
             return;
         }
 
+        var tof = new TMF882X();
+        if (tof.TryDetect(1))
+            Console.WriteLine("TMF882X detected.");
+        else
+            Console.WriteLine("TMF882X not detected.");
+        tof.Start();
+        var (dist, conf) = tof.ReadOnce();
+        tof.Stop();
+
+        Console.WriteLine($"Distance = {dist} mm, Confidence = {conf}");
+  
+
         // Parse port number
 
         int port = 8080;

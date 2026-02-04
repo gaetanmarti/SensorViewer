@@ -4,11 +4,11 @@ namespace immensive;
 
 public enum I2CDetectionState
 {
-    /// <summary>Device detected and responding</summary>
+    // Device detected and responding
     Present,
-    /// <summary>No device at this address</summary>
+    // No device at this address
     Absent,
-    /// <summary>Error during detection</summary>
+    // Error during detection
     Error
 }
 
@@ -112,9 +112,28 @@ public class I2C : IDisposable
     public byte ReadByte(int retry = 3)
         => ReadBytes(1, retry)[0];
 
+    // --- helpers for registers ---
+    
+    public void WriteReg(byte reg, byte value)
+        => WriteBytes([reg, value], 1);
+
+    public byte ReadReg(byte reg)
+    {
+        // set register pointer then read 1 byte
+        WriteBytes([reg],1);
+        return ReadByte(1);
+    }
+
+    public byte[] ReadRegs(byte startReg, int count)
+    {
+        WriteBytes([startReg]);
+        return ReadBytes(count,1);
+    }
+
     public void Dispose()
     {
         Device?.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     /// <summary>
