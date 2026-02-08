@@ -83,6 +83,10 @@ public class TMF882X: II2CDevice
     const ushort DefaultPeriodMs = 50; // Measurement period in milliseconds
     const ushort DefaultKiloIterations = 550; // Measurement iterations times * 1024
 
+    // Default timeouts (ms)
+    public int CommandTimeoutMs { get; set; } = 1000;
+    public int AppIdTimeoutMs { get; set; } = 10;
+
     public override void Initialize(Dictionary<string, string> config, int busId = -1)
     {
         base.Initialize(config, busId);
@@ -107,8 +111,15 @@ public class TMF882X: II2CDevice
 
         // Additional initialization if needed
         // Load the common configuration page with command
+        I2C.WriteReg(REG_CMD_STAT, CMD_STOP);
+        WaitCmdDone();
+
+        if (!IsEnabled())
+            throw new Exception("TMF882X is not enabled after initialization.");
+
+        // Stop measurement if already running
         I2C.WriteReg(REG_CMD_STAT, CMD_LOAD_CONFIG_PAGE_COMMON);
-        WaitCmdDone(1000);
+        WaitCmdDone();
 
         // Configure period/iterations
         I2C.WriteReg(REG_PERIOD_LSB, (byte)(periodMs & 0xFF));
@@ -121,7 +132,7 @@ public class TMF882X: II2CDevice
 
         // Commit config
         I2C.WriteReg(REG_CMD_STAT, CMD_WRITE_CONFIG_PAGE);
-        WaitCmdDone(1000);
+        WaitCmdDone();
     }
 
     public AppId GetAppId()
@@ -360,32 +371,33 @@ public class TMF882X: II2CDevice
     private const byte ChunkSize = 128;
     private const byte DownloadInitParam = 0x29;
 
-    public void DownloadImage()
+    public void DownloadImage(CancellationToken token = default)
     {           
         if (GetAppId() != AppId.Bootloader)
             return; // application already active, no need to re-flash
 
         // 1) DOWNLOAD_INIT
         SendBootloaderCommand(CMD_DOWNLOAD_INIT, [DownloadInitParam]);
-        WaitBootloaderReady();
+        WaitBootloaderReady(token: token);
 
         // 2) SET_ADDR
         SetBootloaderAddress(ImageStartAddress);
-        WaitBootloaderReady();
+        WaitBootloaderReady(token: token);
 
         // 3) W_RAM chunks
         int offset = 0;
         while (offset < _image.Length)
         {
+            token.ThrowIfCancellationRequested();
             int len = Math.Min(ChunkSize, _image.Length - offset);
             WriteBootloaderRamChunk(_image.AsSpan(offset, len));
-            WaitBootloaderReady();
+            WaitBootloaderReady(token: token);
             offset += len;
         }
 
         // 4) RAMREMAP_RESET and wait for application
         SendBootloaderCommand(CMD_RAMREMAP_RESET, []);
-        WaitForAppId(AppId.Application, 10);
+        WaitForAppId(AppId.Application, token: token);
     }
 
 
@@ -396,13 +408,15 @@ public class TMF882X: II2CDevice
     }
 
     // Check that a command has been executed
-    void WaitCmdDone(int timeoutMs = 1000)
+    void WaitCmdDone(int? timeoutMs = null, CancellationToken token = default)
     {
+        int effectiveTimeoutMs = timeoutMs ?? CommandTimeoutMs;
         int t0 = Environment.TickCount;
 
-        while (Environment.TickCount - t0 < timeoutMs)
+        while (Environment.TickCount - t0 < effectiveTimeoutMs)
         {
-            byte v = I2C.ReadReg(CMD_STAT); 
+            token.ThrowIfCancellationRequested();
+            byte v = I2C.ReadReg(CMD_STAT, token); 
 
             // Continue reading if value returned is 0x10..0xFF
             if (v <= 0x0F)
@@ -414,7 +428,7 @@ public class TMF882X: II2CDevice
                 throw new Exception($"TMF882X: CMD_STAT error status=0x{v:X2}");
             }
 
-            Thread.Sleep(2);
+            SleepWithCancellation(2, token);
         }
 
         throw new TimeoutException("TMF882X: CMD_STAT timeout (no status returned).");
@@ -443,20 +457,22 @@ public class TMF882X: II2CDevice
         I2C.WriteBytes(buffer);
     }
 
-    private void WaitBootloaderReady(int timeoutMs = 1000)
+    private void WaitBootloaderReady(int? timeoutMs = null, CancellationToken token = default)
     {
+        int effectiveTimeoutMs = timeoutMs ?? CommandTimeoutMs;
         int start = Environment.TickCount;
-        while (Environment.TickCount - start < timeoutMs)
+        while (Environment.TickCount - start < effectiveTimeoutMs)
         {
             // The host should wait until it reads back the following 3 bytes: 0x00 0x00 0xFF
-            byte[] status = I2C.ReadRegs(REG_CMD_STAT, 3);
+            token.ThrowIfCancellationRequested();
+            byte[] status = I2C.ReadRegs(REG_CMD_STAT, 3, token);
             if (status[0] == 0x00 && status[1] == 0x00 && status[2] == 0xFF)
                 return;
 
             if (status[0] >= 0x01 && status[0] <= 0x0F)
                 throw new Exception($"TMF882X: bootloader CMD_STAT error=0x{status[0]:X2} (csum/size/command).");
 
-            Thread.Sleep(2);
+            SleepWithCancellation(2, token);
         }
 
         throw new TimeoutException("TMF882X: bootloader not ready (CMD_STAT != 00 00 FF).");
@@ -480,57 +496,61 @@ public class TMF882X: II2CDevice
         SendBootloaderCommand(CMD_W_RAM, data);
     }
 
-    private void WaitForAppId(AppId expected, int timeoutMs = 10)
+    private void WaitForAppId(AppId expected, int? timeoutMs = null, CancellationToken token = default)
     {
+        int effectiveTimeoutMs = timeoutMs ?? AppIdTimeoutMs;
         int start = Environment.TickCount;
-        while (Environment.TickCount - start < timeoutMs)
+        while (Environment.TickCount - start < effectiveTimeoutMs)
         {
-            var value = I2C.ReadReg(REG_APPID);
+            token.ThrowIfCancellationRequested();
+            var value = I2C.ReadReg(REG_APPID, token);
             if (value == (byte) expected)
                 return;
-            Thread.Sleep(1);
+            SleepWithCancellation(1, token);
         }
         throw new TimeoutException($"TMF882X: APPID 0x{expected:X2} not reached after download.");
     }
 
-    public void Start()
+    public void Start(CancellationToken token = default)
     {
         // Start measure
-        I2C.WriteReg(REG_CMD_STAT, CMD_MEASURE);
-        WaitCmdDone(1000);
+        I2C.WriteReg(REG_CMD_STAT, CMD_MEASURE, token);
+        WaitCmdDone(token: token);
     }
 
-    void WaitForMeasurement(int timeoutMs)
+    void WaitForMeasurement(int timeoutMs, CancellationToken token = default)
     {
         const byte Interrupt2 = 0x02; // bit mask for interrupt 2 (measurement ready)
         int t0 = Environment.TickCount;
         while (Environment.TickCount - t0 < timeoutMs)
         {
-            if ((I2C.ReadReg(REG_INT_STATUS) & Interrupt2) != 0)
+            token.ThrowIfCancellationRequested();
+            if ((I2C.ReadReg(REG_INT_STATUS, token) & Interrupt2) != 0)
             {
-                I2C.WriteReg(REG_INT_STATUS, Interrupt2);
+                I2C.WriteReg(REG_INT_STATUS, Interrupt2, token);
                 return;
             }
-            Thread.Sleep(5);
+            SleepWithCancellation(5, token);
         }
         throw new TimeoutException("TMF882X: timeout INT");
     }
 
-    public List<(ushort dist, byte conf)> ReadOnce(int TimeoutMs = 2000)
+    public List<(ushort dist, byte conf)> ReadOnce(int TimeoutMs = 2000, CancellationToken token = default)
     {
         // Start measure
-        I2C.WriteReg(REG_CMD_STAT, CMD_MEASURE);
-        WaitCmdDone(1000);
+        I2C.WriteReg(REG_CMD_STAT, CMD_MEASURE, token);
+        WaitCmdDone(token: token);
 
-        WaitForMeasurement(TimeoutMs);
+        WaitForMeasurement(TimeoutMs, token);
 
         List<(ushort dist, byte conf)> results = [];
         for (byte i = 0; i < 9; i++)
         {
+            token.ThrowIfCancellationRequested();
             byte index = (byte)(i * 3);
-            byte conf = I2C.ReadReg((byte)(REG_CONF0 + index));
-            byte lo = I2C.ReadReg((byte)(REG_DIST0_LSB + index));
-            byte hi = I2C.ReadReg((byte)(REG_DIST0_MSB + index));
+            byte conf = I2C.ReadReg((byte)(REG_CONF0 + index), token);
+            byte lo = I2C.ReadReg((byte)(REG_DIST0_LSB + index), token);
+            byte hi = I2C.ReadReg((byte)(REG_DIST0_MSB + index), token);
             results.Add(((ushort)(lo | (hi << 8)), conf));
         }
         return results;
@@ -548,6 +568,18 @@ public class TMF882X: II2CDevice
         byte dL = I2C.ReadReg(0x39);
         byte dH = I2C.ReadReg(0x3A);
         return ((ushort)(dL | (dH << 8)), conf);
+    }
+
+    private static void SleepWithCancellation(int milliseconds, CancellationToken token)
+    {
+        if (!token.CanBeCanceled)
+        {
+            Thread.Sleep(milliseconds);
+            return;
+        }
+
+        if (token.WaitHandle.WaitOne(milliseconds))
+            throw new OperationCanceledException(token);
     }
 
 }

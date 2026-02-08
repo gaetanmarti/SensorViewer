@@ -33,12 +33,12 @@ public class I2C : IDisposable
 
     public static bool Verbose {get;set;} = false;
 
-    public bool Ping ()
+    public bool Ping (CancellationToken token = default)
     {
         try
         {
             // A simple read to check if device responds
-            ReadByte(1);
+            ReadByte(1, token);
             if (Verbose)
                 Console.WriteLine($"[I2C] Ping: Device 0x{DeviceAddress:X2} is present.");
             return true;
@@ -51,7 +51,7 @@ public class I2C : IDisposable
         }
     }
     
-    public bool WriteBytes(byte[] data, int retry = 3)
+    public bool WriteBytes(byte[] data, int retry = 3, CancellationToken token = default)
     {
         if (Verbose)
             Console.WriteLine($"[I2C] WriteBytes: Device 0x{DeviceAddress:X2}, Data={Convert.ToHexString(data)}, Retry={retry}");
@@ -60,6 +60,7 @@ public class I2C : IDisposable
         {
             try
             {
+                token.ThrowIfCancellationRequested();
                 lock (LockI2C)
                 {
                     Device.Write(data);
@@ -71,16 +72,16 @@ public class I2C : IDisposable
             catch
             {
                 if (i == retry - 1) throw;
-                Thread.Sleep(5);
+                SleepWithCancellation(5, token);
             }
         }
         return false;
     }
     
-    public bool WriteByte(byte value, int retry = 3)
-        => WriteBytes([value], retry);
+    public bool WriteByte(byte value, int retry = 3, CancellationToken token = default)
+        => WriteBytes([value], retry, token);
     
-    public byte[] ReadBytes(int count, int retry = 3)
+    public byte[] ReadBytes(int count, int retry = 3, CancellationToken token = default)
     { 
         var buffer = new byte[count];
         if (Verbose)
@@ -90,6 +91,7 @@ public class I2C : IDisposable
         {
             try
             {
+                token.ThrowIfCancellationRequested();
                 lock (LockI2C)
                 {
                     Device.Read(buffer);
@@ -103,31 +105,43 @@ public class I2C : IDisposable
                 if (Verbose)
                     Console.WriteLine($"[I2C] ReadBytes RETRY {i+1}/{retry}: {ex.Message}");
                 if (i == retry - 1) throw;
-                Thread.Sleep(5);
+                SleepWithCancellation(5, token);
             }
         }
         return buffer;
     }
 
-    public byte ReadByte(int retry = 3)
-        => ReadBytes(1, retry)[0];
+    public byte ReadByte(int retry = 3, CancellationToken token = default)
+        => ReadBytes(1, retry, token)[0];
 
     // --- helpers for registers ---
     
-    public void WriteReg(byte reg, byte value)
-        => WriteBytes([reg, value], 1);
+    public void WriteReg(byte reg, byte value, CancellationToken token = default)
+        => WriteBytes([reg, value], 1, token);
 
-    public byte ReadReg(byte reg)
+    public byte ReadReg(byte reg, CancellationToken token = default)
     {
         // set register pointer then read 1 byte
-        WriteBytes([reg],1);
-        return ReadByte(1);
+        WriteBytes([reg],1, token);
+        return ReadByte(1, token);
     }
 
-    public byte[] ReadRegs(byte startReg, int count)
+    public byte[] ReadRegs(byte startReg, int count, CancellationToken token = default)
     {
-        WriteBytes([startReg]);
-        return ReadBytes(count,1);
+        WriteBytes([startReg], 3, token);
+        return ReadBytes(count, 1, token);
+    }
+
+    private static void SleepWithCancellation(int milliseconds, CancellationToken token)
+    {
+        if (!token.CanBeCanceled)
+        {
+            Thread.Sleep(milliseconds);
+            return;
+        }
+
+        if (token.WaitHandle.WaitOne(milliseconds))
+            throw new OperationCanceledException(token);
     }
 
     public void Dispose()
