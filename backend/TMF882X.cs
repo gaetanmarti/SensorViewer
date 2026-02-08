@@ -8,30 +8,6 @@
 
 namespace immensive;
 
-// Interrupt status register (0xE1) bit field
-public readonly struct IntStatus(byte value)
-{
-    public byte RawValue { get; } = value;
-
-    // Bit 6: Status register has been set to non-zero value
-    public bool Int7_StatusRegister => (RawValue & Int7()) != 0;
-
-    // Bit 5: Received command has been handled
-    public bool Int6_CommandHandled => (RawValue & Int6()) != 0;
-
-    // Bit 3: Raw histogram is ready for readout
-    public bool Int4_HistogramReady => (RawValue & Int4()) != 0;
-
-    // Bit 1: Measurement result is ready for readout
-    public bool Int2_MeasurementReady => (RawValue & Int2()) != 0;
-
-    // Clear specific interrupt bit by writing 1 to it
-    public static byte Int7() => 0x40;
-    public static byte Int6() => 0x20;
-    public static byte Int4() => 0x08;
-    public static byte Int2() => 0x02;
-}
-
 public class TMF882X: II2CDevice
 {
     // TMF882X Register addresses
@@ -46,6 +22,7 @@ public class TMF882X: II2CDevice
     private const byte REG_PERIOD_MSB = 0x25;
     private const byte REG_KILO_ITER_LSB = 0x26;
     private const byte REG_KILO_ITER_MSB = 0x27;
+    private const byte REG_SPAD_MAP_ID = 0x34;
 
     // When the "results" page (cid_rid=0x10) is active :
     private const byte REG_CONF0 = 0x38;
@@ -68,7 +45,7 @@ public class TMF882X: II2CDevice
     private const byte CMD_W_RAM = 0x41;
     private const byte CMD_SET_ADDR = 0x43;
     private const byte CMD_RAMREMAP_RESET = 0x11;
-    private const byte  CMD_STAT = 0x08;
+    private const byte CMD_STAT = 0x08;
     
     public TMF882X(int address = 0x41) : base(address)
     {
@@ -102,6 +79,10 @@ public class TMF882X: II2CDevice
         Application = 0x03 // Measurement application running
     }
 
+    // See 7.4.1 SPAD Mask and Mode Selection (p.21) for these settings
+    const ushort DefaultPeriodMs = 50; // Measurement period in milliseconds
+    const ushort DefaultKiloIterations = 550; // Measurement iterations times * 1024
+
     public override void Initialize(Dictionary<string, string> config, int busId = -1)
     {
         base.Initialize(config, busId);
@@ -120,9 +101,27 @@ public class TMF882X: II2CDevice
             default:
                 throw new Exception($"TMF882X: unexpected APPID=0x{appId:X2}.");
         }
-        
+
+        var periodMs = config.TryGetValue("periodMs", out string? value) ? ushort.Parse(value) : DefaultPeriodMs;
+        var kiloIterations = config.TryGetValue("kiloIterations", out value) ? ushort.Parse(value) : DefaultKiloIterations;
 
         // Additional initialization if needed
+        // Load the common configuration page with command
+        I2C.WriteReg(REG_CMD_STAT, CMD_LOAD_CONFIG_PAGE_COMMON);
+        WaitCmdDone(1000);
+
+        // Configure period/iterations
+        I2C.WriteReg(REG_PERIOD_LSB, (byte)(periodMs & 0xFF));
+        I2C.WriteReg(REG_PERIOD_MSB, (byte)((periodMs >> 8) & 0xFF));
+        I2C.WriteReg(REG_KILO_ITER_LSB, (byte)(kiloIterations & 0xFF));
+        I2C.WriteReg(REG_KILO_ITER_MSB, (byte)((kiloIterations >> 8) & 0xFF));
+        
+        // Configure SPAD map to 3x3 normal mode 33°x32° FoV
+        I2C.WriteReg(REG_SPAD_MAP_ID, 0x01);
+
+        // Commit config
+        I2C.WriteReg(REG_CMD_STAT, CMD_WRITE_CONFIG_PAGE);
+        WaitCmdDone(1000);
     }
 
     public AppId GetAppId()
@@ -396,7 +395,7 @@ public class TMF882X: II2CDevice
         I2C.WriteReg(REG_INT_STATUS, mask);
     }
 
-    // CMD_STAT: device writes back 0x00..0x0F when done :contentReference[oaicite:2]{index=2}
+    // Check that a command has been executed
     void WaitCmdDone(int timeoutMs = 1000)
     {
         int t0 = Environment.TickCount;
@@ -405,11 +404,12 @@ public class TMF882X: II2CDevice
         {
             byte v = I2C.ReadReg(CMD_STAT); 
 
-            // Command range is 0x10..0xFF, status range is 0x00..0x0F :contentReference[oaicite:3]{index=3}
+            // Continue reading if value returned is 0x10..0xFF
             if (v <= 0x0F)
             {
-                // 0x00 = STAT_OK, 0x01 = STAT_ACCEPTED, other values are errors :contentReference[oaicite:4]{index=4}
-                if (v == 0x00 || v == 0x01) return;
+                // 0x00 = STAT_OK, 0x01 = STAT_ACCEPTED, other values are errors
+                if (v == 0x00 || v == 0x01)
+                    return;
 
                 throw new Exception($"TMF882X: CMD_STAT error status=0x{v:X2}");
             }
@@ -418,35 +418,6 @@ public class TMF882X: II2CDevice
         }
 
         throw new TimeoutException("TMF882X: CMD_STAT timeout (no status returned).");
-    }
-
-    private void WaitCommandHandled(int timeoutMs = 200)
-    {
-        int start = Environment.TickCount;
-        while (Environment.TickCount - start < timeoutMs)
-        {
-            byte st = I2C.ReadReg(REG_INT_STATUS);
-            if ((st & IntStatus.Int6()) != 0)
-            {
-                ClearIntStatus(IntStatus.Int6());
-                return;             
-            }
-            Thread.Sleep(2);
-        }
-        // If you want, log CMD_STAT here (0x00..0x0F = status; >0x0F = command range) :contentReference[oaicite:12]{index=12}
-        throw new TimeoutException("TMF882X: command not acknowledged (INT6).");
-    }
-
-    private void WaitForResultsPage(int timeoutMs = 500)
-    {
-        int start = Environment.TickCount;
-        while (Environment.TickCount - start < timeoutMs)
-        {
-            byte cid = I2C.ReadReg(REG_CONFIG_RESULT);
-            if (cid == 0x10) return; // MEASUREMENT_RESULT :contentReference[oaicite:13]{index=13}
-            Thread.Sleep(5);
-        }
-        throw new TimeoutException("TMF882X: results page (cid_rid=0x10) never became active.");
     }
 
     private static byte BootloaderChecksum(byte cmd, byte size, ReadOnlySpan<byte> data)
@@ -524,73 +495,20 @@ public class TMF882X: II2CDevice
 
     public void Start()
     {
-        // (Optional but useful) ensure measurement app (0x03) is running, otherwise you're in bootloader. :contentReference[oaicite:5]{index=5}
-        byte appid = I2C.ReadReg(0x00);
-        if (appid != 0x03)
-            throw new Exception($"TMF882X: APPID=0x{appid:X2} (not measurement app 0x03).");
-
-        // Load common page
-        I2C.WriteReg(0x08, 0x16);     // CMD_LOAD_CONFIG_PAGE_COMMON :contentReference[oaicite:6]{index=6}
-        WaitCmdDone(1000);
-
-        // Configure period/iterations
-        I2C.WriteReg(0x24, 50); I2C.WriteReg(0x25, 0);
-        I2C.WriteReg(0x26, 25); I2C.WriteReg(0x27, 0);
-
-        // Commit config
-        I2C.WriteReg(0x08, 0x15);     // CMD_WRITE_CONFIG_PAGE :contentReference[oaicite:7]{index=7}
-        WaitCmdDone(1000);
-
         // Start measure
-        I2C.WriteReg(0x08, 0x10);     // CMD_MEASURE :contentReference[oaicite:8]{index=8}
+        I2C.WriteReg(REG_CMD_STAT, CMD_MEASURE);
         WaitCmdDone(1000);
     }
 
-    public void Start2(int periodMs = 50, int kiloIterations = 25)
+    void WaitForMeasurement(int timeoutMs)
     {
-        // (Optional but useful) ensure measurement app (0x03) is running, otherwise you're in bootloader. :contentReference[oaicite:5]{index=5}
-        byte appid = I2C.ReadReg(0x00);
-        if (appid != 0x03)
-            throw new Exception($"TMF882X: APPID=0x{appid:X2} (not measurement app 0x03).");
-
-        // Optional but useful: ensure cpu_ready=1 before touching pages :contentReference[oaicite:14]{index=14}
-        byte en = I2C.ReadReg(REG_ENABLE);
-        bool cpuReady = (en & (1 << 6)) != 0;
-        if (!cpuReady)
-            throw new InvalidOperationException("TMF882X: ENABLE.cpu_ready=0 (firmware not ready / standby/bootloader mode).");
-
-        // Load common config page
-        I2C.WriteReg(REG_CMD_STAT, CMD_LOAD_CONFIG_PAGE_COMMON);
-        WaitCommandHandled();
-
-        // Configure
-        I2C.WriteReg(REG_PERIOD_LSB, (byte)(periodMs & 0xFF));
-        I2C.WriteReg(REG_PERIOD_MSB, (byte)((periodMs >> 8) & 0xFF));
-        I2C.WriteReg(REG_KILO_ITER_LSB, (byte)(kiloIterations & 0xFF));
-        I2C.WriteReg(REG_KILO_ITER_MSB, (byte)((kiloIterations >> 8) & 0xFF));
-
-        // Commit config
-        I2C.WriteReg(REG_CMD_STAT, CMD_WRITE_CONFIG_PAGE);
-        WaitCommandHandled();
-
-        // Start measurement
-        I2C.WriteReg(REG_CMD_STAT, CMD_MEASURE);
-        WaitCommandHandled();
-
-        // Wait until the results page is active (otherwise reads at 0x24.. are not results)
-        WaitForResultsPage();
-    }
-
-    void ClearInt(byte mask) => I2C.WriteReg(REG_INT_STATUS, mask);
-
-    void WaitInt(byte mask, int timeoutMs)
-    {
+        const byte Interrupt2 = 0x02; // bit mask for interrupt 2 (measurement ready)
         int t0 = Environment.TickCount;
         while (Environment.TickCount - t0 < timeoutMs)
         {
-            if ((I2C.ReadReg(REG_INT_STATUS) & mask) != 0)
+            if ((I2C.ReadReg(REG_INT_STATUS) & Interrupt2) != 0)
             {
-                ClearInt(mask);
+                I2C.WriteReg(REG_INT_STATUS, Interrupt2);
                 return;
             }
             Thread.Sleep(5);
@@ -598,17 +516,25 @@ public class TMF882X: II2CDevice
         throw new TimeoutException("TMF882X: timeout INT");
     }
 
-    public (ushort dist, byte conf) ReadOnce()
+    public List<(ushort dist, byte conf)> ReadOnce(int TimeoutMs = 2000)
     {
-        WaitInt(IntStatus.Int2(), 5000);
+        // Start measure
+        I2C.WriteReg(REG_CMD_STAT, CMD_MEASURE);
+        WaitCmdDone(1000);
 
-        byte conf = I2C.ReadReg(REG_CONF0);
-        byte lo = I2C.ReadReg(REG_DIST0_LSB);
-        byte hi = I2C.ReadReg(REG_DIST0_MSB);
-        return ((ushort)(lo | (hi << 8)), conf);
+        WaitForMeasurement(TimeoutMs);
+
+        List<(ushort dist, byte conf)> results = [];
+        for (byte i = 0; i < 9; i++)
+        {
+            byte index = (byte)(i * 3);
+            byte conf = I2C.ReadReg((byte)(REG_CONF0 + index));
+            byte lo = I2C.ReadReg((byte)(REG_DIST0_LSB + index));
+            byte hi = I2C.ReadReg((byte)(REG_DIST0_MSB + index));
+            results.Add(((ushort)(lo | (hi << 8)), conf));
+        }
+        return results;
     }
-
-    public void Stop() => I2C.WriteReg(REG_CMD_STAT, CMD_STOP);
 
     public (ushort distanceMm, byte confidence) ReadZone1()
     {
@@ -624,22 +550,4 @@ public class TMF882X: II2CDevice
         return ((ushort)(dL | (dH << 8)), conf);
     }
 
-    public void WaitForNextSample_Int2(int timeoutMs = 5000, int pollMs = 5)
-    {
-        int start = Environment.TickCount;
-
-        while (Environment.TickCount - start < timeoutMs)
-        {
-            byte st = I2C.ReadReg(REG_INT_STATUS);
-            if ((st & IntStatus.Int2()) != 0)
-            {
-                // result ready
-                ClearIntStatus(IntStatus.Int2());
-                return;
-            }
-            Thread.Sleep(pollMs);
-        }
-
-        throw new TimeoutException($"TMF882X: no result (INT2) within {timeoutMs} ms.");
-    }
 }

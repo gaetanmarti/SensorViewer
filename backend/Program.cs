@@ -164,12 +164,14 @@ public class Program
             Console.WriteLine("TMF882X not detected.");
         tof.Initialize([], 1);
 
-        tof.Start();
-        var (dist, conf) = tof.ReadOnce();
-        tof.Stop();
-
-        Console.WriteLine($"Distance = {dist} mm, Confidence = {conf}");
-  
+        for (int i = 0; i < 10; i++)
+        {
+            var tuple = tof.ReadOnce();
+            foreach (var (dist, conf) in tuple)
+                Console.WriteLine($"Distance = {dist} mm, Confidence = {conf}");
+            Console.WriteLine("---");
+            Thread.Sleep(10);
+        }
 
         // Parse port number
 
