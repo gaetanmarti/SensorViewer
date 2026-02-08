@@ -162,6 +162,8 @@ public class Program
             Console.WriteLine("TMF882X detected.");
         else
             Console.WriteLine("TMF882X not detected.");
+        tof.Initialize([], 1);
+
         tof.Start();
         var (dist, conf) = tof.ReadOnce();
         tof.Stop();

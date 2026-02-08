@@ -9,10 +9,27 @@ public abstract class II2CDevice (int address)
     // Device name
     public string Name { get; protected set; } = "";
 
+    protected I2C? _i2c = null;
+
     // Associated I2C instance
-    public I2C? I2C { get; protected set; } = null;
+    public I2C I2C { 
+        get {
+            if (_i2c == null)
+                throw new InvalidOperationException($"I2C instance not set for device {Name} at address 0x{Address:X2}");
+            return _i2c;
+        } 
+        protected set => _i2c = value;
+    }
+
+    // Reset the i2c instance (e.g. when device is not responding)
+    protected void Reset ()
+    {
+        _i2c?.Dispose();
+        _i2c = null;
+    }
 
     // Try to detect the device on the specified bus
+    // If detected and responding, set I2C property and return true; otherwise return false
     public virtual bool TryDetect(int busId) => false;
 
     // Equality operator based on Address and Name
@@ -23,6 +40,17 @@ public abstract class II2CDevice (int address)
         if (left is null || right is null)
             return false;
         return left.Address == right.Address && left.Name == right.Name;
+    }
+
+    // Initialize the device
+    public virtual void Initialize(Dictionary<string, string> config, int busId = -1)
+    {
+        if (busId >= 0 && _i2c == null)
+        {
+            I2C = new I2C(busId, Address);
+            return;
+        }
+        throw new InvalidOperationException($"Cannot initialize device {Name} at address 0x{Address:X2}: invalid busId or I2C instance already set.");
     }
 
     // Inequality operator
