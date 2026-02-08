@@ -50,7 +50,8 @@ public abstract class II2CDevice (int address)
             I2C = new I2C(busId, Address);
             return;
         }
-        throw new InvalidOperationException($"Cannot initialize device {Name} at address 0x{Address:X2}: invalid busId or I2C instance already set.");
+        if (_i2c == null)
+            throw new InvalidOperationException($"Cannot initialize device {Name} at address 0x{Address:X2}: invalid busId or I2C instance already set.");
     }
 
     // Inequality operator
