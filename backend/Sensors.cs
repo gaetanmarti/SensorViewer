@@ -22,11 +22,19 @@ public class Sensors
 
     public IResult SensorsDelegate (HttpContext context)
     {
-        Sensors.Sru.Update ();
-        return Results.Json (new SysInfoResponse 
-        { 
-            Sensors = Sensors.Sru.SensorList.List
-        });
+        try
+        {
+            Sensors.Sru.Update ();
+            return Results.Json (new SysInfoResponse 
+            { 
+                Sensors = Sensors.Sru.SensorList.List
+            });
+        }
+        catch (Exception ex)
+        {
+            CustomLogger.Log(this, CustomLogger.LogLevel.Error, $"Error in SensorsDelegate: {ex.Message}");
+            return Results.Json(new { ok = false, error = "Internal server error.", details = ex.Message });
+        }
     }                       
     
 }

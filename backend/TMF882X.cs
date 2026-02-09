@@ -8,7 +8,7 @@
 
 namespace immensive;
 
-public class TMF882X: II2CDevice
+public class TMF882X: II2CDistanceSensor
 {
     // TMF882X Register addresses
     private const byte REG_APPID = 0x00;
@@ -48,12 +48,12 @@ public class TMF882X: II2CDevice
         Name = "TMF882X Time-of-Flight Sensor";
     }
 
-    public override bool TryDetect(int busId)
+    public override bool TryDetect(int busId, CancellationToken token = default)
     {
         try
         {
             I2C = new I2C(busId, Address);
-            if (!I2C.Ping())
+            if (!I2C.Ping(token))
             {
                 Reset();
                 return false;
@@ -69,6 +69,9 @@ public class TMF882X: II2CDevice
         }
     }
 
+    private readonly Specifications _specifications = new(3, 3, 30, 33, 32);
+    public override Specifications CurrentSpecifications() => _specifications;
+
     public enum AppId : byte
     {
         Bootloader = 0x80, // Bootloader running
@@ -76,7 +79,7 @@ public class TMF882X: II2CDevice
     }
 
     // See 7.4.1 SPAD Mask and Mode Selection (p.21) for these settings
-    const ushort DefaultPeriodMs = 50; // Measurement period in milliseconds
+    const ushort DefaultPeriodMs = 34; // Measurement period in milliseconds
     const ushort DefaultKiloIterations = 550; // Measurement iterations times * 1024
 
     // Default timeouts (ms)
@@ -92,21 +95,23 @@ public class TMF882X: II2CDevice
     /// - "kiloIterations": Measurement iterations times 1024 (default: 550)
     /// </param>
     /// <param name="busId">The I2C bus ID. If -1, the default bus is used.</param>
-    public override void Initialize(Dictionary<string, string> config, int busId = -1)
+    /// <param name="token">Optional cancellation token.</param>
+    public override void Initialize(Dictionary<string, string> config, int busId = -1, CancellationToken token = default)
     {
-        base.Initialize(config, busId);
+        base.Initialize(config, busId, token);
+        Initialized = false; // Will be set to true at the end of initialization if successful
 
         var appId = GetAppId();
         switch (appId)
         {
             case AppId.Application:
                 // Stop any ongoing measurement (if device was already running)        
-                I2C.WriteReg(REG_CMD_STAT, CMD_STOP);
-                WaitCmdDone();
+                I2C.WriteReg(REG_CMD_STAT, CMD_STOP, token);
+                WaitCmdDone(token: token);
                 break;
             case AppId.Bootloader:
                 // Download bootloader and reset in APP mode
-                DownloadImage();
+                DownloadImage(token);
                 break;
             default:
                 throw new Exception($"TMF882X: unexpected APPID=0x{appId:X2}.");
@@ -119,21 +124,22 @@ public class TMF882X: II2CDevice
             throw new Exception("TMF882X is not enabled after initialization.");
 
         // Load the common configuration page with command
-        I2C.WriteReg(REG_CMD_STAT, CMD_LOAD_CONFIG_PAGE_COMMON);
-        WaitCmdDone();
+        I2C.WriteReg(REG_CMD_STAT, CMD_LOAD_CONFIG_PAGE_COMMON, token);
+        WaitCmdDone(token: token);
 
         // Configure period/iterations
-        I2C.WriteReg(REG_PERIOD_LSB, (byte)(periodMs & 0xFF));
-        I2C.WriteReg(REG_PERIOD_MSB, (byte)((periodMs >> 8) & 0xFF));
-        I2C.WriteReg(REG_KILO_ITER_LSB, (byte)(kiloIterations & 0xFF));
-        I2C.WriteReg(REG_KILO_ITER_MSB, (byte)((kiloIterations >> 8) & 0xFF));
+        I2C.WriteReg(REG_PERIOD_LSB, (byte)(periodMs & 0xFF), token);
+        I2C.WriteReg(REG_PERIOD_MSB, (byte)((periodMs >> 8) & 0xFF), token);
+        I2C.WriteReg(REG_KILO_ITER_LSB, (byte)(kiloIterations & 0xFF), token);
+        I2C.WriteReg(REG_KILO_ITER_MSB, (byte)((kiloIterations >> 8) & 0xFF), token);
         
         // Configure SPAD map to 3x3 normal mode 33°x32° FoV
-        I2C.WriteReg(REG_SPAD_MAP_ID, 0x01);
+        I2C.WriteReg(REG_SPAD_MAP_ID, 0x01, token);
 
         // Commit config
-        I2C.WriteReg(REG_CMD_STAT, CMD_WRITE_CONFIG_PAGE);
-        WaitCmdDone();
+        I2C.WriteReg(REG_CMD_STAT, CMD_WRITE_CONFIG_PAGE, token);
+        WaitCmdDone(token: token);
+        Initialized = true;
     }
 
     public AppId GetAppId()
@@ -529,7 +535,7 @@ public class TMF882X: II2CDevice
         throw new TimeoutException("TMF882X: timeout INT");
     }
 
-    public List<(ushort dist, byte conf)> ReadOnce(int TimeoutMs = 2000, CancellationToken token = default)
+    public override List<(int distMM, float confidence)> ReadOnce(int TimeoutMs = 1000, CancellationToken token = default)
     {
         // Start measure
         I2C.WriteReg(REG_CMD_STAT, CMD_MEASURE, token);
@@ -537,7 +543,7 @@ public class TMF882X: II2CDevice
 
         WaitForMeasurement(TimeoutMs, token);
 
-        List<(ushort dist, byte conf)> results = [];
+        List<(int distMM, float confidence)> results = [];
         for (byte i = 0; i < 9; i++)
         {
             token.ThrowIfCancellationRequested();
@@ -545,7 +551,8 @@ public class TMF882X: II2CDevice
             byte conf = I2C.ReadReg((byte)(REG_CONF0 + index), token);
             byte lo = I2C.ReadReg((byte)(REG_DIST0_LSB + index), token);
             byte hi = I2C.ReadReg((byte)(REG_DIST0_MSB + index), token);
-            results.Add(((ushort)(lo | (hi << 8)), conf));
+            ushort dist = (ushort)(lo | ((ushort)hi << 8));
+            results.Add(((int)dist, (float)conf/255.0f));
         }
         return results;
     }

@@ -30,6 +30,10 @@ Health check endpoint to verify if the server is running and available.
 }
 ```
 
+##### Error responses:
+
+- `500`: Internal server error
+
 ##### Example:
 
 ```bash
@@ -62,6 +66,10 @@ Return the sensor list with:
 - Unit [None, Temperature, Percent]
 - Value
 
+##### Error responses:
+
+- `500`: Internal server error
+
 ##### Example:
 
 ```bash
@@ -84,24 +92,108 @@ Detect and list all I2C devices connected on the bus.
 
 ```json
 {
-  "ok": true,
-  "devices": [
-    { "address": 60, "name": "Unknown I2C Device" },
-    { "address": 72, "name": "Custom Sensor" }
+  "ok":true,
+  "devices":
+  [
+    {"address":65,"name":"TMF882X Time-of-Flight Sensor","type":"Distance"}
   ]
-}
+}   
 ```
 
 Return the list of detected I2C devices with:
 - Address: I2C device address (decimal format)
 - Name: Device name (if registered) or "Unknown I2C Device"
+- Type: Device type (e.g. Distance)
+
+##### Error responses:
+
+- `500`: Internal server error
+- `499`: Operation cancelled
 
 ##### Example:
 
 ```bash
 curl -X GET http://localhost:8080/api/i2c/devices
 
-{"ok":true,"devices":[{"address":60,"name":"Unknown I2C Device"}]}
+{"ok":true,"devices":[{"address":65,"name":"TMF882X Time-of-Flight Sensor","type":"TMF882X"}]}
+```
+
+---
+
+#### `GET /api/i2c/device/{address}/specifications`
+
+Return the specification record for a distance sensor at the given I2C address.
+
+##### Parameters:
+
+- `address`: I2C address in decimal or hexadecimal (e.g. `65` or `0x41`).
+
+##### Response (200 OK):
+
+```json
+{
+  "ok": true,
+  "address": 65,
+  "name": "TMF882X Time-of-Flight Sensor",
+  "specifications": {
+    "width": 3,
+    "height": 3,
+    "updateRateHz": 30,
+    "verticalFOVDeg": 33,
+    "horizontalFOVDeg": 32
+  }
+}
+```
+
+##### Error responses:
+
+- `400`: Invalid I2C address
+- `404`: Distance sensor not found
+- `500`: Internal server error
+- `499`: Operation cancelled
+
+##### Example:
+
+```bash
+curl -X GET http://localhost:8080/api/i2c/device/0x41/specifications
+```
+
+---
+
+#### `GET /api/i2c/device/{address}/measure`
+
+Return a single distance measurement for the specified distance sensor.
+
+##### Parameters:
+
+- `address`: I2C address in decimal or hexadecimal (e.g. `65` or `0x41`).
+
+##### Response (200 OK):
+
+```json
+{
+  "ok": true,
+  "address": 65,
+  "name": "TMF882X Time-of-Flight Sensor",
+  "measurement": [
+    { "distMM": 482, "confidence": 0.95 },
+    { "distMM": 490, "confidence": 0.92 }
+  ]
+}
+```
+
+##### Error responses:
+
+- `400`: Invalid I2C address
+- `404`: Distance sensor not found
+- `408`: Measurement timeout
+- `500`: Internal server error
+- `499`: Operation cancelled
+
+##### Example:
+
+```bash
+curl -X GET http://localhost:8080/api/i2c/device/0x41/measure
 ```
 
 ---

@@ -57,6 +57,73 @@ public class Program
         app.MapGet("/api/i2c/devices",  (HttpContext context) =>
             Global.ManagerI2C.DevicesDelegate(context));
 
+        app.MapGet("/api/i2c/device/{address}/specifications", (HttpContext context, string address) =>
+        {
+            try
+            {
+                if (!TryParseI2cAddress(address, out int addr))
+                    return Results.BadRequest(new { ok = false, error = "Invalid I2C address." });
+
+                if (!Global.ManagerI2C.TryGetDistanceSensor(addr, out var sensor, context.RequestAborted) || sensor == null)
+                    return Results.NotFound(new { ok = false, error = "Distance sensor not found." });
+
+                var specs = sensor.CurrentSpecifications();
+                return Results.Json(new
+                {
+                    ok = true,
+                    address = sensor.Address,
+                    name = sensor.Name,
+                    specifications = specs
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                return Results.Json(new { ok = false, error = "Operation cancelled." });
+            }
+            catch (Exception ex)
+            {
+                CustomLogger.Log(null, CustomLogger.LogLevel.Error, $"Error in /specifications: {ex.Message}");
+                return Results.Json(new { ok = false, error = "Internal server error.", details = ex.Message });
+            }
+        });
+
+        app.MapGet("/api/i2c/device/{address}/measure", (HttpContext context, string address) =>
+        {
+            try
+            {
+                if (!TryParseI2cAddress(address, out int addr))
+                    return Results.BadRequest(new { ok = false, error = "Invalid I2C address." });
+
+                if (!Global.ManagerI2C.TryGetDistanceSensor(addr, out var sensor, context.RequestAborted) || sensor == null)
+                    return Results.NotFound(new { ok = false, error = "Distance sensor not found." });
+
+                var measurement = sensor.ReadOnce(token: context.RequestAborted)
+                    .Select(m => new { distMM = m.distMM, confidence = Math.Round(m.confidence, 3) })
+                    .ToList();
+                return Results.Json(new
+                {
+                    ok = true,
+                    address = sensor.Address,
+                    name = sensor.Name,
+                    measurement
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                return Results.Json(new { ok = false, error = "Operation cancelled." });
+            }
+            catch (TimeoutException ex)
+            {
+                CustomLogger.Log(null, CustomLogger.LogLevel.Warning, $"Timeout in /measure: {ex.Message}");
+                return Results.Json(new { ok = false, error = "Measurement timeout.", details = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                CustomLogger.Log(null, CustomLogger.LogLevel.Error, $"Error in /measure: {ex.Message}");
+                return Results.Json(new { ok = false, error = "Internal server error.", details = ex.Message });
+            }
+        });
+
         // ==================================
         // Root endpoint (for captive portal)
         // ==================================
@@ -133,6 +200,19 @@ public class Program
         });
                 
         await app.RunAsync(token);
+    }
+
+    private static bool TryParseI2cAddress(string addressText, out int address)
+    {
+        address = 0;
+        if (string.IsNullOrWhiteSpace(addressText))
+            return false;
+
+        addressText = addressText.Trim();
+        if (addressText.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            return int.TryParse(addressText[2..], System.Globalization.NumberStyles.HexNumber, null, out address);
+
+        return int.TryParse(addressText, out address);
     }
 
     static void DisplayHelp()

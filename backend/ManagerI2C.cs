@@ -30,18 +30,19 @@ public class ManagerI2C
 
     // Try to auto-detect all I2C devices on the bus
     // Returns the List of auto-detected devices
-    public List<II2CDevice> AutoDetectDevices()
+    public List<II2CDevice> AutoDetectDevices(CancellationToken token = default)
     {
         var devices = new List<II2CDevice>();
         byte[] buffer = new byte[1];
 
         for (int addr = 0x03; addr <= 0x77; addr++)
         {
+            token.ThrowIfCancellationRequested();
             if (I2C.TryDetectDevice(_busId, addr, buffer) == I2CDetectionState.Present) {
                 bool found = false;
                 if (Devices.TryGetValue(addr, out List<II2CDevice>? value))
                     foreach (var device in value) {
-                        if (device.TryDetect(_busId)) {
+                        if (device.TryDetect(_busId, token)) {
                             devices.Add(device);
                             found = true;
                             break;
@@ -57,19 +58,64 @@ public class ManagerI2C
         return devices;
     }
 
+    /// <summary>
+    /// Try to resolve a distance sensor by address, detecting it on the bus if needed.
+    /// </summary>
+    public bool TryGetDistanceSensor(int address, out II2CDistanceSensor? sensor, CancellationToken token = default)
+    {
+        sensor = null;
+
+        if (!Devices.TryGetValue(address, out List<II2CDevice>? value))
+            return false;
+
+        foreach (var device in value)
+        {
+            token.ThrowIfCancellationRequested();
+            II2CDistanceSensor? distanceSensor = device as II2CDistanceSensor;
+            if (distanceSensor == null)
+                continue;
+            switch (distanceSensor.Status)
+            {
+                case II2CDevice.DeviceStatus.Unknown:
+                case II2CDevice.DeviceStatus.Detected:
+                    distanceSensor.Initialize([], _busId, token);
+                    break;
+            }
+            if (distanceSensor.Status != II2CDevice.DeviceStatus.Initialized)
+                return false;
+            
+            sensor = distanceSensor;
+            return true;
+        }
+        return false;
+    }
+
     // API endpoint delegate to get detected I2C devices
     public IResult DevicesDelegate(HttpContext context)
     {
-        var detectedDevices = AutoDetectDevices();
-        
-        return Results.Json(new
+        try
         {
-            ok = true,
-            devices = detectedDevices.Select(d => new
+            var detectedDevices = AutoDetectDevices(context.RequestAborted);
+            
+            return Results.Json(new
             {
-                address = d.Address,
-                name = d.Name
-            }).ToList()
-        });
+                ok = true,
+                devices = detectedDevices.Select(d => new
+                {
+                    address = d.Address,
+                    name = d.Name,
+                    type = d.GetType().Name
+                }).ToList()
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            return Results.Json(new { ok = false, error = "Operation cancelled." });
+        }
+        catch (Exception ex)
+        {
+            CustomLogger.Log(this, CustomLogger.LogLevel.Error, $"Error in DevicesDelegate: {ex.Message}");
+            return Results.Json(new { ok = false, error = "Internal server error.", details = ex.Message });
+        }
     }
 }
