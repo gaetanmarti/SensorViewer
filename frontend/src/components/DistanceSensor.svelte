@@ -29,7 +29,7 @@
   
   // 3D view controls
   let rotationX = $state(-60);
-  let rotationY = $state(0);
+  let rotationY = $state(180);
   let isDragging = $state(false);
   let dragStartX = $state(0);
   let dragStartY = $state(0);
@@ -323,7 +323,7 @@
               +
             </button>
             <button 
-              onclick={() => { rotationX = -60; rotationY = 0; zoom = 1.0; }}
+              onclick={() => { rotationX = -60; rotationY = 180; zoom = 1.0; }}
               class="px-2 py-1 bg-gray-200 hover:bg-gray-300 rounded"
             >
               Reset View
@@ -344,25 +344,36 @@
             <div 
               class="absolute inset-0 flex items-center justify-center"
               style="
-                transform: rotateX({rotationX}deg) rotateY({rotationY}deg) scale({zoom});
+                transform: translateZ({(zoom - 1) * 400}px) rotateX({rotationX}deg) rotateY({rotationY}deg);
                 transform-style: preserve-3d;
                 transition: transform 0.1s ease-out;
               "
             >
-              <!-- Sensor at origin (center) -->
-              <div 
-                class="absolute bg-blue-500 rounded-full shadow-lg"
+              <!-- Sensor at origin (center) as blue cross -->
+              <!-- Vertical bar -->
+              <div
+                class="absolute bg-blue-500"
                 style="
-                  width: 30px;
-                  height: 30px;
-                  transform: translateZ(0);
-                  box-shadow: 0 0 20px rgba(59, 130, 246, 0.8);
+                  width: 4px;
+                  height: 40px;
+                  left: 50%;
+                  top: 50%;
+                  transform: translate(-50%, -50%) translateZ(-50px);
+                  box-shadow: 0 0 15px rgba(59, 130, 246, 0.8);
                 "
-              >
-                <div class="absolute inset-0 flex items-center justify-center text-white text-xs font-bold">
-                  S
-                </div>
-              </div>
+              ></div>
+              <!-- Horizontal bar -->
+              <div
+                class="absolute bg-blue-500"
+                style="
+                  width: 40px;
+                  height: 4px;
+                  left: 50%;
+                  top: 50%;
+                  transform: translate(-50%, -50%) translateZ(-50px);
+                  box-shadow: 0 0 15px rgba(59, 130, 246, 0.8);
+                "
+              ></div>
 
               <!-- Distance scale discs (ground plane every 500mm) -->
               {#each [500, 1000, 1500, 2000] as distance, idx}
@@ -376,14 +387,14 @@
                     height: {radius * 2}px;
                     left: 50%;
                     top: 50%;
-                    transform: translateX(-50%) translateY(-50%) translateZ(-50px) rotateX(90deg);
+                    transform: translate(-50%, -50%) translateZ(-50px) rotateX(90deg);
                     transform-style: preserve-3d;
                     pointer-events: none;
                   "
                 >
                   <circle 
-                    cx="{radius}" 
-                    cy="{radius}" 
+                    cx="50%" 
+                    cy="50%" 
                     r="{radius}" 
                     fill="transparent" 
                     stroke="rgba(200, 200, 200, 0.8)" 
@@ -398,7 +409,7 @@
                   style="
                     left: 50%;
                     top: 50%;
-                    transform: translate(-50%, -50%) translateZ(-50px) rotateX(90deg) translateY({radius}px);
+                    transform: translate(-50%, -50%) translateZ(-50px) rotateX(90deg) translateY({radius}px) rotateZ(180deg);
                     transform-style: preserve-3d;
                   "
                 >
@@ -437,68 +448,21 @@
                   "
                 >
                   <!-- Zone label -->
-                  <div 
-                    class="absolute inset-0 flex flex-col items-center justify-center text-xs font-bold pointer-events-none"
-                    style="
-                      transform: rotateY({-pos3d.angleH}deg) rotateX({pos3d.angleV}deg);
-                      text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
-                    "
-                  >
-                    <div class="text-white">Z{index + 1}</div>
-                    <div class="text-white text-[10px] mt-1">{formatDistance(measurement.distMM)}</div>
-                    <div class="text-white text-[9px] opacity-80">{(measurement.confidence * 100).toFixed(0)}%</div>
-                  </div>
+                  {#if measurement.distMM >= 750}
+                    <div 
+                      class="absolute inset-0 flex flex-col items-center justify-center text-xs font-bold pointer-events-none"
+                      style="
+                        transform: rotateY(180deg);
+                        text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+                      "
+                    >
+                      <div class="text-white">Z{index + 1}</div>
+                      <div class="text-white text-[10px] mt-1">{formatDistance(measurement.distMM)}</div>
+                      <div class="text-white text-[9px] opacity-80">{(measurement.confidence * 100).toFixed(0)}%</div>
+                    </div>
+                  {/if}
                 </div>
-
-                <!-- Connection line from sensor to zone -->
-                <div 
-                  class="absolute bg-blue-400"
-                  style="
-                    width: 2px;
-                    height: {measurement.distMM / 5}px;
-                    transform: 
-                      translateX({pos3d.x / 5}px)
-                      translateY({-pos3d.y / 5}px)
-                      translateZ({pos3d.z / 10}px)
-                      rotateY({pos3d.angleH}deg)
-                      rotateX({90 - pos3d.angleV}deg);
-                    transform-origin: top center;
-                    opacity: 0.3;
-                  "
-                ></div>
               {/each}
-
-              <!-- FOV cone outline -->
-              {#if specifications}
-                {@const maxDist = Math.max(...measurements.map(m => m.distMM))}
-                {@const coneDepth = maxDist / 5}
-                {@const hFOV = specifications.horizontalFOVDeg}
-                {@const vFOV = specifications.verticalFOVDeg}
-                {@const topWidth = 2 * maxDist * Math.tan((hFOV * Math.PI / 180) / 2) / 5}
-                {@const topHeight = 2 * maxDist * Math.tan((vFOV * Math.PI / 180) / 2) / 5}
-                
-                <!-- FOV pyramid edges -->
-                {#each [
-                  { x: -topWidth/2, y: -topHeight/2 },
-                  { x: topWidth/2, y: -topHeight/2 },
-                  { x: topWidth/2, y: topHeight/2 },
-                  { x: -topWidth/2, y: topHeight/2 }
-                ] as corner}
-                  <div 
-                    class="absolute bg-yellow-500"
-                    style="
-                      width: 1px;
-                      height: {coneDepth}px;
-                      transform: 
-                        translateX({corner.x}px)
-                        translateY({corner.y}px)
-                        translateZ({coneDepth/2}px)
-                        rotateX(90deg);
-                      opacity: 0.4;
-                    "
-                  ></div>
-                {/each}
-              {/if}
             </div>
           </div>
         </div>
