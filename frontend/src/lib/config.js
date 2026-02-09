@@ -17,6 +17,9 @@ export const API_BASE_URL = import.meta.env.MODE === 'production' ? 'http://192.
 export const POLLING_INTERVALS = {
   // PC Sensors polling interval (5000ms = every 5 seconds)
   PC_SENSORS: 5000,
+  
+  // I2C distance sensors polling interval (1000ms = every 1 second)
+  I2C_DISTANCE_SENSORS: 300,
 };
 
 /**
@@ -28,4 +31,9 @@ export const API_ENDPOINTS = {
   
   // Sensors
   SENSORS: '/api/sensors',
+  
+  // I2C endpoints
+  I2C_DEVICES: '/api/i2c/devices',
+  I2C_DEVICE_SPECIFICATIONS: (address) => `/api/i2c/device/${address}/specifications`,
+  I2C_DEVICE_MEASURE: (address) => `/api/i2c/device/${address}/measure`,
 };
