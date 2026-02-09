@@ -1,10 +1,10 @@
 // Time-of-Flight distance sensors TMF882X
 // Hookup guide: https://learn.sparkfun.com/tutorials/qwiic-dtof-imager-tmf882x-hookup-guide/all
 // Datasheet: https://cdn.sparkfun.com/assets/learn_tutorials/2/2/8/9/TMF882X_DataSheet.pdf
+// Host driver communication: https://look.ams-osram.com/m/5bfe4f6d8a09e607/original/TMF882X-Host-Driver-Communication-AN001015.pdf
 // Firmware images: 
 // 1. https://github.com/uwgraphics/mini_tof_firmware/blob/main/TMF882X/firmware/tmf882x_image.c
 // 2. https://github.com/sparkfun/SparkFun_Qwiic_TMF882X_Arduino_Library/blob/main/src/tof_bin_image.c
-// Host driver communication: https://look.ams-osram.com/m/5bfe4f6d8a09e607/original/TMF882X-Host-Driver-Communication-AN001015.pdf
 
 namespace immensive;
 
@@ -17,27 +17,23 @@ public class TMF882X: II2CDevice
     private const byte REG_ENABLE = 0xE0;
     private const byte REG_CONFIG_RESULT = 0x20;
 
-    // When page "common config" (cid_rid=0x16) is loaded :
+    // When page "common config" is loaded :
     private const byte REG_PERIOD_LSB = 0x24;
     private const byte REG_PERIOD_MSB = 0x25;
     private const byte REG_KILO_ITER_LSB = 0x26;
     private const byte REG_KILO_ITER_MSB = 0x27;
     private const byte REG_SPAD_MAP_ID = 0x34;
 
-    // When the "results" page (cid_rid=0x10) is active :
+    // When the "results" page is active :
     private const byte REG_CONF0 = 0x38;
     private const byte REG_DIST0_LSB = 0x39;
     private const byte REG_DIST0_MSB = 0x3A;
     
-    // Commands
-    
-    // Measure: start a cyclic measurement according to the configuration
+    // Commands 
     private const byte CMD_MEASURE = 0x10;
-    // Configuration page (whatever page has been loaded to registers 0x20 andfollowing will be written to the device)
     private const byte CMD_WRITE_CONFIG_PAGE = 0x15;
-    // Load Configuration Page 0 - common configuration
     private const byte CMD_LOAD_CONFIG_PAGE_COMMON = 0x16;
-    // Stop: Abort any ongoing measurement
+    private const byte CMD_RESET = 0xFE;
     private const byte CMD_STOP = 0xFF;
 
     // Bootloader commands (chapter 3)
@@ -87,6 +83,15 @@ public class TMF882X: II2CDevice
     public int CommandTimeoutMs { get; set; } = 1000;
     public int AppIdTimeoutMs { get; set; } = 10;
 
+    /// <summary>
+    /// Initializes the TMF882X sensor with the specified configuration.
+    /// </summary>
+    /// <param name="config">A dictionary containing configuration parameters.
+    /// Supported keys:
+    /// - "periodMs": Measurement period in milliseconds (default: 50)
+    /// - "kiloIterations": Measurement iterations times 1024 (default: 550)
+    /// </param>
+    /// <param name="busId">The I2C bus ID. If -1, the default bus is used.</param>
     public override void Initialize(Dictionary<string, string> config, int busId = -1)
     {
         base.Initialize(config, busId);
@@ -95,12 +100,13 @@ public class TMF882X: II2CDevice
         switch (appId)
         {
             case AppId.Application:
-                // Already running application, nothing to do
+                // Stop any ongoing measurement (if device was already running)        
+                I2C.WriteReg(REG_CMD_STAT, CMD_STOP);
+                WaitCmdDone();
                 break;
             case AppId.Bootloader:
-                // Download and start RAM bootloader
+                // Download bootloader and reset in APP mode
                 DownloadImage();
-                //WaitForAppId(AppId.RamBootloader);
                 break;
             default:
                 throw new Exception($"TMF882X: unexpected APPID=0x{appId:X2}.");
@@ -109,15 +115,10 @@ public class TMF882X: II2CDevice
         var periodMs = config.TryGetValue("periodMs", out string? value) ? ushort.Parse(value) : DefaultPeriodMs;
         var kiloIterations = config.TryGetValue("kiloIterations", out value) ? ushort.Parse(value) : DefaultKiloIterations;
 
-        // Additional initialization if needed
-        // Load the common configuration page with command
-        I2C.WriteReg(REG_CMD_STAT, CMD_STOP);
-        WaitCmdDone();
-
         if (!IsEnabled())
             throw new Exception("TMF882X is not enabled after initialization.");
 
-        // Stop measurement if already running
+        // Load the common configuration page with command
         I2C.WriteReg(REG_CMD_STAT, CMD_LOAD_CONFIG_PAGE_COMMON);
         WaitCmdDone();
 
@@ -400,13 +401,6 @@ public class TMF882X: II2CDevice
         WaitForAppId(AppId.Application, token: token);
     }
 
-
-    private void ClearIntStatus(byte mask)
-    {
-        // R_PUSH1: writing '1' clears the corresponding interrupt bit :contentReference[oaicite:11]{index=11}
-        I2C.WriteReg(REG_INT_STATUS, mask);
-    }
-
     // Check that a command has been executed
     void WaitCmdDone(int? timeoutMs = null, CancellationToken token = default)
     {
@@ -554,20 +548,6 @@ public class TMF882X: II2CDevice
             results.Add(((ushort)(lo | (hi << 8)), conf));
         }
         return results;
-    }
-
-    public (ushort distanceMm, byte confidence) ReadZone1()
-    {
-        // You can keep your block read starting at 0x20 if you want.
-        // But at minimum, ensure CONFIG_RESULT==0x10 first.
-        if (I2C.ReadReg(REG_CONFIG_RESULT) != 0x10)
-            throw new InvalidOperationException("TMF882X: not on results page (cid_rid != 0x10).");
-
-        // zone0 distance/confidence (cid_rid=0x10) :contentReference[oaicite:15]{index=15}
-        byte conf = I2C.ReadReg(0x38);
-        byte dL = I2C.ReadReg(0x39);
-        byte dH = I2C.ReadReg(0x3A);
-        return ((ushort)(dL | (dH << 8)), conf);
     }
 
     private static void SleepWithCancellation(int milliseconds, CancellationToken token)
