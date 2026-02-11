@@ -1,4 +1,5 @@
 using System.Device.I2c;
+using Iot.Device.Mcp23xxx;
 
 namespace immensive;
 
@@ -10,6 +11,7 @@ public class ManagerI2C
         _busId = busId;
 
         RegisterDevice(new TMF882X());
+        RegisterDevice(new VL53L5CX());
     }
 
     private readonly int _busId;

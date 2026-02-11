@@ -4,6 +4,9 @@ using Microsoft.Extensions.FileProviders;
 
 public class Program
 {
+    // Lock for I2C operations to prevent concurrent access
+    private static readonly object _i2cLock = new();
+
     private static async Task RunWebService (int port, string[]? args = null, CancellationToken token = default)
     {
         WebApplicationBuilder? builder = WebApplication.CreateBuilder(args ?? []);
@@ -55,13 +58,28 @@ public class Program
         // =============
         
         app.MapGet("/api/i2c/devices",  (HttpContext context) =>
-            Global.ManagerI2C.DevicesDelegate(context));
+        {
+            lock (_i2cLock)
+            {
+                return Global.ManagerI2C.DevicesDelegate(context);
+            }
+        });
 
         app.MapGet("/api/i2c/device/{address}/specifications", (HttpContext context, string address) =>
-            Global.ManagerI2C.DeviceSpecificationsDelegate(context, address));
+        {
+            lock (_i2cLock)
+            {
+                return Global.ManagerI2C.DeviceSpecificationsDelegate(context, address);
+            }
+        });
 
         app.MapGet("/api/i2c/device/{address}/measure", (HttpContext context, string address) =>
-            Global.ManagerI2C.DeviceMeasureDelegate(context, address));
+        {
+            lock (_i2cLock)
+            {
+                return Global.ManagerI2C.DeviceMeasureDelegate(context, address);
+            }
+        });
 
         // ==================================
         // Root endpoint (for captive portal)
@@ -163,13 +181,13 @@ public class Program
             return;
         }
 
+        /* TESTS
         var tof = new TMF882X();
         if (tof.TryDetect(1))
             Console.WriteLine("TMF882X detected.");
         else
             Console.WriteLine("TMF882X not detected.");
         tof.Initialize([], 1);
-
         for (int i = 0; i < 10; i++)
         {
             var tuple = tof.ReadOnce();
@@ -178,7 +196,8 @@ public class Program
             Console.WriteLine("---");
             Thread.Sleep(10);
         }
-
+        */
+        
         // Parse port number
 
         int port = 8080;

@@ -1,4 +1,6 @@
 // Time-of-Flight distance sensors TMF882X
+// Tested with TMF8820 and TMF8821 (same driver, different SPAD map for different FoV)
+
 // Hookup guide: https://learn.sparkfun.com/tutorials/qwiic-dtof-imager-tmf882x-hookup-guide/all
 // Datasheet: https://cdn.sparkfun.com/assets/learn_tutorials/2/2/8/9/TMF882X_DataSheet.pdf
 // Host driver communication: https://look.ams-osram.com/m/5bfe4f6d8a09e607/original/TMF882X-Host-Driver-Communication-AN001015.pdf
