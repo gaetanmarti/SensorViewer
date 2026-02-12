@@ -32,6 +32,7 @@ public abstract class II2CDevice (int address)
     public DeviceType Type { get; protected set; } = DeviceType.Unknown;
 
     protected I2C? _i2c = null;
+    protected virtual I2C.TransferMode PreferredTransferMode => I2C.TransferMode.Auto;
 
     /// <summary>
     /// Associated I2C instance for the device. Throws if not initialized.
@@ -72,14 +73,38 @@ public abstract class II2CDevice (int address)
     {
         Initialized = false;
         token.ThrowIfCancellationRequested();
-        if (busId >= 0 && _i2c == null)
+        if (busId >= 0)
         {
-            I2C = new I2C(busId, Address);
+            var mode = ResolveTransferMode(config);
+            if (_i2c == null)
+            {
+                I2C = new I2C(busId, Address, mode);
+            }
+            else if (_i2c.Mode != mode)
+            {
+                _i2c.Dispose();
+                I2C = new I2C(busId, Address, mode);
+            }
             Initialized = true;
             return;
         }
         if (_i2c == null)
             throw new InvalidOperationException($"Cannot initialize device {Name} at address 0x{Address:X2}: invalid busId or I2C instance already set.");
+    }
+
+    protected I2C.TransferMode ResolveTransferMode(Dictionary<string, string> config)
+    {
+        if (config.TryGetValue("i2cTransferMode", out string? value) && !string.IsNullOrWhiteSpace(value))
+        {
+            if (value.Equals("writeread", StringComparison.OrdinalIgnoreCase))
+                return I2C.TransferMode.WriteRead;
+            if (value.Equals("writethenread", StringComparison.OrdinalIgnoreCase))
+                return I2C.TransferMode.WriteThenRead;
+            if (value.Equals("auto", StringComparison.OrdinalIgnoreCase))
+                return I2C.TransferMode.Auto;
+        }
+
+        return PreferredTransferMode;
     }
 
     protected bool Initialized = false;

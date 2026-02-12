@@ -50,11 +50,13 @@ public class TMF882X: II2CDistanceSensor
         Name = "TMF882X Time-of-Flight Sensor";
     }
 
+    protected override I2C.TransferMode PreferredTransferMode => I2C.TransferMode.WriteThenRead;
+
     public override bool TryDetect(int busId, CancellationToken token = default)
     {
         try
         {
-            I2C = new I2C(busId, Address);
+            I2C = new I2C(busId, Address, I2C.TransferMode.Auto);
             if (!I2C.Ping(token))
             {
                 Reset();

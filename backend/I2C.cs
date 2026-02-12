@@ -14,17 +14,27 @@ public enum I2CDetectionState
 
 public class I2C : IDisposable
 {
-    protected I2cDevice Device {get;private set;}
-    protected object LockI2C  {get;private set;}  = new();
-
-    public I2C (int busId, int deviceAddress)
+    public enum TransferMode
     {
-        Device = I2cDevice.Create(new I2cConnectionSettings(busId, deviceAddress));
+        Auto,
+        WriteRead,
+        WriteThenRead
     }
 
-    public I2C (I2cDevice device)
+    protected I2cDevice Device {get;private set;}
+    protected object LockI2C  {get;private set;}  = new();
+    public TransferMode Mode { get; }
+
+    public I2C (int busId, int deviceAddress, TransferMode mode = TransferMode.Auto)
+    {
+        Device = I2cDevice.Create(new I2cConnectionSettings(busId, deviceAddress));
+        Mode = mode;
+    }
+
+    public I2C (I2cDevice device, TransferMode mode = TransferMode.Auto)
     {
         Device = device;
+        Mode = mode;
     }
 
     protected int DeviceAddress { get {
@@ -114,6 +124,59 @@ public class I2C : IDisposable
     public byte ReadByte(int retry = 3, CancellationToken token = default)
         => ReadBytes(1, retry, token)[0];
 
+    public byte[] WriteRead(byte[] writeBuffer, int readCount, int retry = 3, CancellationToken token = default)
+    {
+        if (Verbose)
+            Console.WriteLine($"[I2C] WriteRead: Device 0x{DeviceAddress:X2}, Write={Convert.ToHexString(writeBuffer)}, ReadCount={readCount}, Retry={retry}");
+
+        var readBuffer = new byte[readCount];
+        for (int i = 0; i < retry; i++)
+        {
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                lock (LockI2C)
+                {
+                    Device.WriteRead(writeBuffer, readBuffer);
+                    if (Verbose)
+                        Console.WriteLine($"[I2C] WriteRead SUCCESS: {Convert.ToHexString(readBuffer)}");
+                }
+                return readBuffer;
+            }
+            catch (Exception ex)
+            {
+                if (Verbose)
+                    Console.WriteLine($"[I2C] WriteRead RETRY {i + 1}/{retry}: {ex.Message}");
+                if (i == retry - 1) throw;
+                SleepWithCancellation(5, token);
+            }
+        }
+
+        return readBuffer;
+    }
+
+    public byte[] ReadWithPointer(byte[] addrBuffer, int readCount, int retry = 3, CancellationToken token = default)
+    {
+        switch (Mode)
+        {
+            case TransferMode.WriteThenRead:
+                WriteBytes(addrBuffer, retry, token);
+                return ReadBytes(readCount, retry, token);
+            case TransferMode.WriteRead:
+                return WriteRead(addrBuffer, readCount, retry, token);
+            default:
+                try
+                {
+                    return WriteRead(addrBuffer, readCount, retry, token);
+                }
+                catch
+                {
+                    WriteBytes(addrBuffer, retry, token);
+                    return ReadBytes(readCount, retry, token);
+                }
+        }
+    }
+
     // --- helpers for registers ---
     
     public void WriteReg(byte reg, byte value, CancellationToken token = default)
@@ -121,15 +184,12 @@ public class I2C : IDisposable
 
     public byte ReadReg(byte reg, CancellationToken token = default)
     {
-        // set register pointer then read 1 byte
-        WriteBytes([reg],1, token);
-        return ReadByte(1, token);
+        return ReadWithPointer([reg], 1, 3, token)[0];
     }
 
     public byte[] ReadRegs(byte startReg, int count, CancellationToken token = default)
     {
-        WriteBytes([startReg], 3, token);
-        return ReadBytes(count, 1, token);
+        return ReadWithPointer([startReg], count, 3, token);
     }
 
     private static void SleepWithCancellation(int milliseconds, CancellationToken token)
