@@ -42,6 +42,14 @@ public class VL53L5CX : II2CDistanceSensor
         Wakeup = 0x01
     }
 
+    // Firmware states
+    private enum FirmwareState
+    {
+        NotLoaded,  // Firmware not in RAM (needs full download)
+        Crashed,    // Firmware in RAM but crashed (needs MCU reset only)
+        Ready       // Firmware running and ready
+    }
+
     // Default configuration values
     private const Resolution DefaultResolution = Resolution.Res4x4;
     private const byte DefaultRangingFrequencyHz = 15; // Hz (max 15 for 8x8, 60 for 4x4)
@@ -196,18 +204,34 @@ public class VL53L5CX : II2CDistanceSensor
             _specifications8x8 = _specifications8x8 with { UpdateRateHz = _rangingFrequencyHz };
 
         // Check if firmware is already loaded BEFORE any reset (reset would erase it from RAM)
-        bool firmwareAlreadyLoaded = IsFirmwareLoaded(token);
+        // This is useful when re-initializing without power cycling the sensor
+        FirmwareState firmwareState = CheckFirmwareState(token);
         
-        if (firmwareAlreadyLoaded)
+        if (firmwareState == FirmwareState.Ready)
         {
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-                "VL53L5CX firmware already loaded, skipping reset and download.");
-            // Firmware was already loaded - enable access to it
-            EnableFirmwareAccess(token);
+                "VL53L5CX firmware already loaded and running, skipping reset and download.");
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                "Proceeding directly to DCI configuration (offset, xtalk, default config).");
+            // Firmware is already running - proceed directly to DCI configuration
+            // Do NOT call EnableFirmwareAccess or reset, as it would disrupt the running firmware
         }
-        else
+        else if (firmwareState == FirmwareState.Crashed)
         {
-            // Always perform software reset and firmware download (as per ST's C++ implementation)
+            // Firmware in RAM but crashed - reset MCU to restart it
+            CustomLogger.Log(this, CustomLogger.LogLevel.Warning, 
+                "VL53L5CX firmware crashed, performing MCU reset (fast recovery ~1s).");
+            
+            ResetMCU(token);
+            
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                "MCU reset successful, firmware restarted. Proceeding to DCI configuration.");
+        }
+        else // FirmwareState.NotLoaded
+        {
+            // Firmware not loaded - perform full initialization sequence (as per ST's C++ implementation)
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                "VL53L5CX firmware not loaded, performing full initialization sequence.");
             
             // 1. Software reset and boot sequence (ST lines 214-240)
             SoftwareReset(token);
@@ -359,58 +383,120 @@ public class VL53L5CX : II2CDistanceSensor
         WriteReg16(0x0020, 0x06, token);
     }
 
-    private bool IsFirmwareLoaded(CancellationToken token = default)
+    /// <summary>
+    /// Check the current firmware state by reading status registers.
+    /// Returns: Ready (firmware running), Crashed (in RAM but crashed), NotLoaded (needs download).
+    /// </summary>
+    private FirmwareState CheckFirmwareState(CancellationToken token = default)
     {
         try
         {
-            // Check if firmware is already running by reading firmware state register
-            // Register 0x06 bit 0 = MCU boot complete
-            // Register 0x21 bit 4 = firmware ready
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Checking if firmware is already loaded...");
+            // Check if firmware is already running by reading firmware state registers
+            // This check is useful when re-initializing without power cycling the sensor
+            // Note: After power cycle, firmware is lost (stored in RAM, not flash)
+            
+            // Register 0x06 in bank 0x00: MCU boot status (bit 0 = boot complete)
+            // Register 0x21 in bank 0x01: Firmware status (0x10 = ready, 0x04 = crashed, 0x00 = not loaded)
+            
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Checking firmware state...");
             
             SetBank(0x00, token);
-            byte bootStatus = ReadReg16(0x06, token);
+            byte bootStatus = ReadReg16(0x0006, token);
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"Boot status (0x06): 0x{bootStatus:X2}");
             
             if ((bootStatus & 0x01) != 0x01)
             {
                 CustomLogger.Log(this, CustomLogger.LogLevel.Info, "MCU not booted yet, firmware not loaded");
-                return false;
+                return FirmwareState.NotLoaded;
             }
             
             SetBank(0x01, token);
-            byte fwStatus = ReadReg16(0x21, token);
+            byte fwStatus = ReadReg16(0x0021, token);
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"Firmware status (0x21): 0x{fwStatus:X2}");
             SetBank(0x00, token);
             
-            // Firmware is loaded if bit 4 is set (0x10)
-            // Note: 0x04 means firmware crashed, 0x00 means not loaded
-            bool isLoaded = (fwStatus & 0x10) == 0x10;
-            
-            if (isLoaded)
+            // Determine state based on firmware status register
+            // 0x10 = ready, 0x04 = crashed, 0x00 = not loaded
+            if ((fwStatus & 0x10) == 0x10)
             {
                 CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-                    "VL53L5CX firmware already loaded and ready.");
+                    "✓ Firmware READY - will skip download");
+                return FirmwareState.Ready;
             }
             else if (fwStatus == 0x04)
             {
                 CustomLogger.Log(this, CustomLogger.LogLevel.Warning, 
-                    "VL53L5CX firmware crashed (status=0x04), will reset and reload.");
+                    "✗ Firmware CRASHED - will reset MCU only (~1s)");
+                return FirmwareState.Crashed;
             }
             else
             {
                 CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-                    $"VL53L5CX firmware not loaded (status=0x{fwStatus:X2}), will download.");
+                    $"✗ Firmware NOT LOADED (status=0x{fwStatus:X2}) - will download (~10s)");
+                return FirmwareState.NotLoaded;
             }
-            
-            return isLoaded;
         }
         catch (Exception ex)
         {
             CustomLogger.Log(this, CustomLogger.LogLevel.Warning, 
-                $"Failed to check firmware status: {ex.Message}");
-            return false;
+                $"Failed to check firmware status: {ex.Message} - will assume firmware not loaded.");
+            return FirmwareState.NotLoaded;
         }
+    }
+
+    /// <summary>
+    /// Reset MCU to restart firmware that's already in RAM. Much faster than full firmware download.
+    /// Used when firmware has crashed (status 0x04) but is still loaded in RAM.
+    /// </summary>
+    private void ResetMCU(CancellationToken token = default)
+    {
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Resetting MCU to restart firmware in RAM...");
+        
+        // MCU reset sequence (same as end of DownloadFirmware)
+        SetBank(0x00, token);
+        WriteReg16(0x0114, 0x00, token);
+        WriteReg16(0x0115, 0x00, token);
+        WriteReg16(0x0116, 0x42, token);
+        WriteReg16(0x0117, 0x00, token);
+        WriteReg16(0x000B, 0x00, token);
+        WriteReg16(0x000C, 0x00, token);
+        WriteReg16(0x000B, 0x01, token);
+        
+        // Wait a bit for MCU to reset
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Waiting for MCU to reset...");
+        Thread.Sleep(100);
+        
+        // Verify firmware is back to ready state (0x10)
+        // Note: After crash, polling for 0x06==0x00 doesn't work reliably,
+        // so we just wait and verify firmware status instead
+        SetBank(0x01, token);
+        
+        int startTime = Environment.TickCount;
+        bool fwReady = false;
+        while (Environment.TickCount - startTime < InitTimeoutMs)
+        {
+            token.ThrowIfCancellationRequested();
+            byte fwStatus = ReadReg16(0x0021, token);
+            
+            if ((fwStatus & 0x10) == 0x10)
+            {
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                    $"Firmware ready after reset (status=0x{fwStatus:X2})");
+                fwReady = true;
+                break;
+            }
+            
+            Thread.Sleep(50);
+        }
+        
+        SetBank(0x00, token);
+        
+        if (!fwReady)
+        {
+            throw new TimeoutException("VL53L5CX: Firmware did not become ready after MCU reset");
+        }
+        
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "MCU reset complete, firmware restarted successfully");
     }
 
     private void SetResolution(Resolution resolution, CancellationToken token = default)
@@ -770,9 +856,9 @@ public class VL53L5CX : II2CDistanceSensor
         cmd[2] = (byte)((dataSize & 0xFF0) >> 4);
         cmd[3] = (byte)((dataSize & 0x0F) << 4);
 
-        SetBank(0x00, token);
+        // CRITICAL: DCI operations work in CURRENT bank (bank 0x02)
         WriteReg16((ushort)(REG_UI_CMD_END - 11), cmd, token);
-        // Note: Bank 0x00 already active (reads in current bank)
+        // Poll in current bank (bank 0x02)
         PollForAnswer(4, 1, REG_UI_CMD_STATUS, 0xFF, 0x03, 2000, 10, token);
 
         byte[] buffer = ReadMultipleBytes(REG_UI_CMD_START, dataSize + 12, token);
@@ -831,8 +917,13 @@ public class VL53L5CX : II2CDistanceSensor
 
         try
         {
-            EnsureWakeup(token);
-            EnsureHostAccess(token);
+            // CRITICAL: Ensure bank 0x02 is active for DCI operations
+            // ST's vl53l5cx_start_ranging() expects bank 0x02 (set during init and never changed)
+            SetBank(0x02, token);
+            
+            // NOTE: Do NOT call EnsureWakeup/EnsureHostAccess here!
+            // ST's vl53l5cx_start_ranging() does not do this - sensor is already awake after init
+            // Calling them here perturbs DCI operations and causes timeouts
 
             // Output list and enables follow ST reference (vl53l5cx_start_ranging)
             uint[] output =
@@ -852,7 +943,8 @@ public class VL53L5CX : II2CDistanceSensor
             ];
 
             // Enable mandatory + all optional outputs (ST default)
-            uint[] output_bh_enable = [0x00001FFF, 0x00000000, 0x00000000, 0xC0000000];
+            // 0x0FFF = 12 bits (outputs 0-11), 0x1FFF would enable invalid bit 12
+            uint[] output_bh_enable = [0x00000FFF, 0x00000000, 0x00000000, 0xC0000000];
 
             byte resolution = (byte)_currentResolution;
             byte nbTargets = VL53L5CXFirmware.VL53L5CX_FW_NBTAR_RANGING;
@@ -907,39 +999,43 @@ public class VL53L5CX : II2CDistanceSensor
             DciWriteData(UIntArrayToBytes(output), VL53L5CX_DCI_OUTPUT_LIST, token);
             DciWriteData(UIntArrayToBytes(headerConfig), VL53L5CX_DCI_OUTPUT_CONFIG, token);
             DciWriteData(UIntArrayToBytes(output_bh_enable), VL53L5CX_DCI_OUTPUT_ENABLES, token);
+            
+            // Verify firmware is still ready after DCI writes
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Verifying firmware status after DCI writes...");
+            SetBank(0x01, token);
+            byte fwStatus = ReadReg16(0x0021, token);
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Firmware status after DCI writes: 0x{fwStatus:X2}");
+            
+            if ((fwStatus & 0x10) != 0x10)
+            {
+                throw new InvalidOperationException($"VL53L5CX: Firmware not ready after DCI writes (status=0x{fwStatus:X2})");
+            }
 
-            // Start xshut bypass (interrupt mode)
+            // Start xshut bypass (interrupt mode) - ST's sequence
             SetBank(0x00, token);
             WriteReg16(0x0009, 0x05, token);
+            
+            // Small delay to let xshut bypass take effect
+            Thread.Sleep(10);
+            
             SetBank(0x02, token);
 
-            // Start ranging session (UI command in bank 0x00)
-            SetBank(0x00, token);
+            // Verify UI command region is accessible before sending ranging command
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Checking UI command status before ranging command...");
+            byte[] preStatus = ReadMultipleBytes(0x2C00, 4, token);
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                $"VL53L5CX: Pre-ranging UI status: [0x{preStatus[0]:X2}, 0x{preStatus[1]:X2}, 0x{preStatus[2]:X2}, 0x{preStatus[3]:X2}]");
+
+            // Start ranging session (UI command region 0x2C00-0x2FFF is in bank 0x02)
+            // NOTE: Stay in bank 0x02 - do NOT switch to bank 0x00 here!
             byte[] cmd = [0x00, 0x03, 0x00, 0x00];
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Writing ranging start command to 0x2FFC...");
             WriteReg16(0x2FFC, cmd, token);
 
-            // Poll for command accepted
-            SetBank(0x00, token);
-            int startTime = Environment.TickCount;
-            bool cmdAccepted = false;
-            while (Environment.TickCount - startTime < CommandTimeoutMs)
-            {
-                token.ThrowIfCancellationRequested();
-                byte status = ReadReg16(0x2C00, token);
-                if ((status & 0x03) == 0x03)
-                {
-                    cmdAccepted = true;
-                    break;
-                }
-                Thread.Sleep(10);
-            }
+            // Poll for command accepted (in bank 0x02 where we already are)
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Polling for ranging command acceptance...");
+            PollForAnswer(4, 1, 0x2C00, 0xFF, 0x03, CommandTimeoutMs, 10, token);
 
-            if (!cmdAccepted)
-            {
-                CustomLogger.Log(this, CustomLogger.LogLevel.Warning, "VL53L5CX: Command accepted timeout");
-            }
-
-            SetBank(0x00, token);
             _streamcount = 255;
             _isRanging = true;
 
@@ -981,23 +1077,27 @@ public class VL53L5CX : II2CDistanceSensor
         return true;
     }
 
+    /// <summary>
+    /// Check if new ranging data is ready (ST's vl53l5cx_check_data_ready)
+    /// </summary>
     private bool CheckDataReady(CancellationToken token = default)
     {
-        // Results (status + streamcount) are in bank 0x02
+        // Read 4 bytes from address 0x0 in current bank (bank 0x02 for ranging data)
+        // ST's C++: RdMulti(&(p_dev->platform), 0x0, p_dev->temp_buffer, 4)
         SetBank(0x02, token);
         byte[] statusBytes = ReadMultipleBytes(0x0000, 4, token);
 
-        bool streamcountChanged = statusBytes[0] != _streamcount && statusBytes[0] != 255;
-        bool byte1Check = statusBytes[1] == 0x05;
-        bool byte2Check = (statusBytes[2] & 0x05) == 0x05;
-        bool byte3Check = (statusBytes[3] & 0x10) == 0x10;
-
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
-            $"VL53L5CX: CheckDataReady - statusBytes=[0x{statusBytes[0]:X2}, 0x{statusBytes[1]:X2}, 0x{statusBytes[2]:X2}, 0x{statusBytes[3]:X2}], _streamcount={_streamcount}");
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
-            $"VL53L5CX: Checks - streamcountChanged={streamcountChanged}, byte1={byte1Check}, byte2={byte2Check}, byte3={byte3Check}");
-
-        if (streamcountChanged && byte1Check && byte2Check && byte3Check)
+        // ST's condition:
+        // (temp_buffer[0] != streamcount) && (temp_buffer[0] != 255)
+        // && (temp_buffer[1] == 0x5)
+        // && ((temp_buffer[2] & 0x5) == 0x5)
+        // && ((temp_buffer[3] & 0x10) == 0x10)
+        
+        if ((statusBytes[0] != _streamcount)
+            && (statusBytes[0] != 255)
+            && (statusBytes[1] == 0x05)
+            && ((statusBytes[2] & 0x05) == 0x05)
+            && ((statusBytes[3] & 0x10) == 0x10))
         {
             _streamcount = statusBytes[0];
             return true;
@@ -1140,12 +1240,22 @@ public class VL53L5CX : II2CDistanceSensor
         Array.Copy(footer, 0, _tempBuffer, 4 + payload.Length, footer.Length);
 
         ushort address = (ushort)(REG_UI_CMD_END - (dataSize + 12) + 1);
-        SetBank(0x00, token);
+        
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+            $"DciWriteData: index=0x{index:X4}, dataSize={dataSize}, address=0x{address:X4}");
+        
+        // CRITICAL FIX: DCI operations work in bank 0x02 (NOT bank 0x00)
+        // ST's vl53l5cx_dci_write_data() does NOT change bank - uses current bank (0x02)
+        // Bank 0x02 must be active before calling DciWriteData (set by caller)
+        // DO NOT call SetBank here - it causes DCI operations to fail!
         WriteReg16(address, _tempBuffer.AsSpan(0, dataSize + 12).ToArray(), token);
         
-        // Switch to bank 0x02 to poll REG_UI_CMD_STATUS (0x2C00 is in bank 0x02)
-        SetBank(0x02, token);
+        // Poll in current bank (bank 0x02) - ST's code does NOT change bank
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+            "DciWriteData: Polling for command completion...");
         PollForAnswer(4, 1, REG_UI_CMD_STATUS, 0xFF, 0x03, 2000, 10, token);
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+            "DciWriteData: Command completed successfully");
     }
 
     private static byte[] UIntArrayToBytes(uint[] values)
