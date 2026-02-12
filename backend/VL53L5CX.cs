@@ -259,8 +259,11 @@ public class VL53L5CX : II2CDistanceSensor
         Array.Copy(VL53L5CXFirmware.VL53L5CX_DEFAULT_XTALK, _xtalkData, _xtalkData.Length);
         SendXtalkData(Resolution.Res4x4, token);
         WriteDefaultConfiguration(token);
-        // Note: ApplyPipeControl is NOT called during init in ST's implementation
-        // It's done inside Start() via output configuration
+        
+        // Apply pipe control and single range (ST's vl53l5cx_init lines 339-353)
+        // This configures NB_TARGET_PER_ZONE=1 and SINGLE_RANGE=1 (autonomous mode)
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Applying pipe control configuration...");
+        ApplyPipeControl(token);
 
         // Note: Default configuration already sets resolution to 4x4
         // Only call SetResolution if user wants a different resolution
@@ -276,11 +279,14 @@ public class VL53L5CX : II2CDistanceSensor
                 "VL53L5CX: Using default 4x4 resolution from firmware configuration");
         }
         
-        // Note: ST's vl53l5cx_init() does NOT call SetRangingMode/SetRangingFrequency/SetIntegrationTime
-        // These are user-configurable settings called AFTER init, not during init
-        // We use firmware defaults during init, user can change them later if needed
+        // ST's examples show these MUST be called after init and before start_ranging
+        // Even though init sets defaults, these functions properly activate the settings
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-            $"VL53L5CX: Using firmware defaults (mode={_rangingMode}, freq={_rangingFrequencyHz}Hz, integration={integrationTimeMs}ms)");
+            $"VL53L5CX: Configuring ranging parameters (mode={_rangingMode}, freq={_rangingFrequencyHz}Hz, integration={integrationTimeMs}ms)");
+        
+        SetRangingMode(_rangingMode, token);
+        SetRangingFrequency(_rangingFrequencyHz, token);
+        SetIntegrationTime(integrationTimeMs, token);
         
         // Mark as initialized
         Initialized = true;
@@ -1000,31 +1006,10 @@ public class VL53L5CX : II2CDistanceSensor
             DciWriteData(UIntArrayToBytes(headerConfig), VL53L5CX_DCI_OUTPUT_CONFIG, token);
             DciWriteData(UIntArrayToBytes(output_bh_enable), VL53L5CX_DCI_OUTPUT_ENABLES, token);
             
-            // Verify firmware is still ready after DCI writes
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Verifying firmware status after DCI writes...");
-            SetBank(0x01, token);
-            byte fwStatus = ReadReg16(0x0021, token);
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Firmware status after DCI writes: 0x{fwStatus:X2}");
-            
-            if ((fwStatus & 0x10) != 0x10)
-            {
-                throw new InvalidOperationException($"VL53L5CX: Firmware not ready after DCI writes (status=0x{fwStatus:X2})");
-            }
-
-            // Start xshut bypass (interrupt mode) - ST's sequence
+            // Start xshut bypass - ST's exact sequence (NO status verification in between!)
             SetBank(0x00, token);
             WriteReg16(0x0009, 0x05, token);
-            
-            // Small delay to let xshut bypass take effect
-            Thread.Sleep(10);
-            
             SetBank(0x02, token);
-
-            // Verify UI command region is accessible before sending ranging command
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Checking UI command status before ranging command...");
-            byte[] preStatus = ReadMultipleBytes(0x2C00, 4, token);
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-                $"VL53L5CX: Pre-ranging UI status: [0x{preStatus[0]:X2}, 0x{preStatus[1]:X2}, 0x{preStatus[2]:X2}, 0x{preStatus[3]:X2}]");
 
             // Start ranging session (UI command region 0x2C00-0x2FFF is in bank 0x02)
             // NOTE: Stay in bank 0x02 - do NOT switch to bank 0x00 here!
@@ -1087,18 +1072,24 @@ public class VL53L5CX : II2CDistanceSensor
         SetBank(0x02, token);
         byte[] statusBytes = ReadMultipleBytes(0x0000, 4, token);
 
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+            $"CheckDataReady: status=[0x{statusBytes[0]:X2}, 0x{statusBytes[1]:X2}, 0x{statusBytes[2]:X2}, 0x{statusBytes[3]:X2}], streamcount={_streamcount}");
+
         // ST's condition:
         // (temp_buffer[0] != streamcount) && (temp_buffer[0] != 255)
         // && (temp_buffer[1] == 0x5)
         // && ((temp_buffer[2] & 0x5) == 0x5)
         // && ((temp_buffer[3] & 0x10) == 0x10)
         
-        if ((statusBytes[0] != _streamcount)
+        bool ready = (statusBytes[0] != _streamcount)
             && (statusBytes[0] != 255)
             && (statusBytes[1] == 0x05)
             && ((statusBytes[2] & 0x05) == 0x05)
-            && ((statusBytes[3] & 0x10) == 0x10))
+            && ((statusBytes[3] & 0x10) == 0x10);
+
+        if (ready)
         {
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"CheckDataReady: DATA READY! New streamcount={statusBytes[0]}");
             _streamcount = statusBytes[0];
             return true;
         }
@@ -1142,15 +1133,26 @@ public class VL53L5CX : II2CDistanceSensor
             if (remaining <= 0)
                 throw new TimeoutException("VL53L5CX: Measurement timeout");
 
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: ReadOnce - waiting for measurement");
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: ReadOnce - waiting for measurement (dataSize={dataSize})");
             WaitForMeasurement(remaining, token);
 
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: ReadOnce - data ready, reading buffer...");
             SetBank(0x02, token);
             buffer = ReadMultipleBytes(0x0000, dataSize, token);
+            
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                $"VL53L5CX: ReadOnce - buffer read BEFORE swap, bytes 12-19: [{string.Join(", ", buffer.Skip(12).Take(8).Select(b => $"0x{b:X2}"))}]");
+            
             SwapBuffer(buffer, dataSize);
+            
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                $"VL53L5CX: ReadOnce - buffer AFTER swap, bytes 12-19: [{string.Join(", ", buffer.Skip(12).Take(8).Select(b => $"0x{b:X2}"))}]");
 
             if (!IsAllZero(buffer))
+            {
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: ReadOnce - valid data received");
                 break;
+            }
 
             CustomLogger.Log(this, CustomLogger.LogLevel.Warning,
                 "VL53L5CX: ReadOnce - empty frame (all zeros), retrying");
@@ -1162,42 +1164,90 @@ public class VL53L5CX : II2CDistanceSensor
         short[] distances = new short[numZones];
         byte[] targetStatuses = new byte[numZones];
 
-        int i = 16; // Skip metadata
+        // ST's data format: first 4 bytes are status, then START_BH at offset 12
+        int i = 12; // Start at offset 12 where START_BH should be
+        
+        // Verify and skip START_BH (0x0000000D)
+        // After SwapBuffer, data is in little-endian, BitConverter.ToUInt32 reads correctly
+        uint startBh = BitConverter.ToUInt32(buffer, i);
+        if (startBh == VL53L5CX_START_BH)
+        {
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Found START_BH at offset {i}, skipping to data blocks");
+            i += 4; // Skip START_BH (4 bytes)
+        }
+        else
+        {
+            CustomLogger.Log(this, CustomLogger.LogLevel.Warning, 
+                $"VL53L5CX: Expected START_BH (0x{VL53L5CX_START_BH:X8}) at offset {i}, got 0x{startBh:X8}");
+        }
+        
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Parsing data blocks, numZones={numZones}, starting at offset {i}");
+        
+        int blockCount = 0;
         while (i < dataSize - 4)
         {
             token.ThrowIfCancellationRequested();
 
+            // After SwapBuffer, data is in little-endian, BitConverter.ToUInt32 reads correctly
             uint blockHeader = BitConverter.ToUInt32(buffer, i);
             uint type = blockHeader & 0xF;
             uint size = (blockHeader >> 4) & 0xFFF;
             uint idx = (blockHeader >> 16) & 0xFFFF;
 
-            if (type == 0 || type >= 0x0D)
-                break;
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                $"VL53L5CX: Block {blockCount} @ offset {i}: header=0x{blockHeader:X8}, type={type}, size={size}, idx=0x{idx:X4}");
 
+            // Type 0x0D is START_BH or higher = end marker
+            if (type >= 0x0D)
+            {
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: End marker (type=0x{type:X})");
+                break;
+            }
+
+            // Calculate block data size (ST's formula)
             int msize = (type >= 1 && type < 0x0D) ? (int)(type * size) : (int)size;
+            
+            // Type 0x0 = metadata/header (skip)
+            if (type == 0)
+            {
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Skipping metadata block (type=0, size={msize} bytes)");
+                i += msize + 4;
+                continue;
+            }
 
             if (idx == VL53L5CX_DISTANCE_IDX)
             {
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Found DISTANCE block, reading {numZones} distances...");
                 int dataOffset = i + 4;
+                
+                // Log first 16 bytes of distance data to check if data is actually present
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                    $"VL53L5CX: Distance block raw bytes (first 16): [{string.Join(", ", buffer.Skip(dataOffset).Take(16).Select(b => $"0x{b:X2}"))}]");
+                
                 for (int z = 0; z < numZones && dataOffset + 1 < dataSize; z++)
                 {
                     distances[z] = BitConverter.ToInt16(buffer, dataOffset);
+                    CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"  Zone {z}: raw={distances[z]} (bytes: 0x{buffer[dataOffset]:X2} 0x{buffer[dataOffset+1]:X2})");
                     dataOffset += 2;
                 }
             }
             else if (idx == VL53L5CX_TARGET_STATUS_IDX)
             {
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Found TARGET_STATUS block, reading {numZones} statuses...");
                 int dataOffset = i + 4;
                 for (int z = 0; z < numZones && dataOffset < dataSize; z++)
                 {
                     targetStatuses[z] = buffer[dataOffset];
+                    CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"  Zone {z}: status=0x{targetStatuses[z]:X2}");
                     dataOffset += 1;
                 }
             }
 
             i += msize + 4;
+            blockCount++;
         }
+        
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Parsed {blockCount} blocks");
 
         for (int z = 0; z < numZones; z++)
         {
