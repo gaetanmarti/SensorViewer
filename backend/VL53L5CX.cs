@@ -506,7 +506,7 @@ public class VL53L5CX : II2CDistanceSensor
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Stopping ranging");
         
         SetBank(0x00, token);
-        I2C.WriteReg(0x09, 0x04, token);
+        WriteReg16(0x0009, 0x04, token);
         
         // Poll for command completion
         SetBank(0x00, token);
@@ -527,18 +527,18 @@ public class VL53L5CX : II2CDistanceSensor
     {
         // Wakeup sequence from ST's vl53l5cx_set_power_mode (WAKEUP)
         SetBank(0x00, token);
-        byte bootStatus = I2C.ReadReg(0x06, token);  // 8-bit read in bank 0x00
+        byte bootStatus = ReadReg16(0x0006, token);
         CustomLogger.Log(this, CustomLogger.LogLevel.Info,
             $"VL53L5CX: Pre-wakeup boot status=0x{bootStatus:X2}");
 
-        I2C.WriteReg(0x09, 0x04, token);  // 8-bit write in bank 0x00
+        WriteReg16(0x0009, 0x04, token);
 
         int startTime = Environment.TickCount;
         bool ready = false;
         while (Environment.TickCount - startTime < CommandTimeoutMs)
         {
             token.ThrowIfCancellationRequested();
-            bootStatus = I2C.ReadReg(0x06, token);  // 8-bit read in bank 0x00
+            bootStatus = ReadReg16(0x0006, token);
             if ((bootStatus & 0x01) == 0x01)
             {
                 ready = true;
@@ -558,8 +558,8 @@ public class VL53L5CX : II2CDistanceSensor
     {
         // Enable host access to GO1 (ST init sequence)
         SetBank(0x00, token);
-        I2C.WriteReg(0x0C, 0x01, token);  // 8-bit address 0x0C in bank 0x00
-        byte access = I2C.ReadReg(0x0C, token);  // 8-bit read
+        WriteReg16(0x000C, 0x01, token);
+        byte access = ReadReg16(0x000C, token);
         CustomLogger.Log(this, CustomLogger.LogLevel.Info,
             $"VL53L5CX: Host access 0x000C=0x{access:X2}");
     }
@@ -910,7 +910,7 @@ public class VL53L5CX : II2CDistanceSensor
 
             // Start xshut bypass (interrupt mode)
             SetBank(0x00, token);
-            I2C.WriteReg(0x09, 0x05, token);
+            WriteReg16(0x0009, 0x05, token);
             SetBank(0x02, token);
 
             // Start ranging session (UI command in bank 0x00)
