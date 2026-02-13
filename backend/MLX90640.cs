@@ -1,9 +1,12 @@
 // MLX90640 32x24 thermopile array from Melexis
 // Implementation using Meadow.Foundation library
+// Hookup guide: https://learn.sparkfun.com/tutorials/qwiic-ir-array-mlx90640-hookup-guide/all
 // Datasheet: https://cdn.sparkfun.com/assets/3/1/c/6/f/MLX90640-Datasheet.pdf
+// Meadow library documentation: https://www.nuget.org/packages/Meadow.Foundation.Sensors.Camera.Mlx90640/2.5.0.5-beta
 
 using Meadow.Foundation.Sensors.Camera;
 using Meadow.Hardware;
+using Meadow.Units;
 using System.Device.I2c;
 
 namespace immensive;
@@ -81,9 +84,44 @@ public class MLX90640 : II2CThermalSensor
 
             // Initialize Meadow MLX90640 sensor
             _meadowSensor = new Mlx90640(i2cBus, (byte)Address);
+            _meadowSensor.SetRefreshRate(Mlx90640.RefreshRate._2hz); // Default to 2Hz, can be overridden by config
+            _meadowSensor.SetResolution(Mlx90640.Resolution.NineteenBit);
+            _meadowSensor.SetMode(Mlx90640.Mode.Interleaved); // Chess mode for better noise performance
+
+            // Configure emissivity if specified (default 0.95)
+            // Human skin: 0.98, walls: 0.85-0.95, metal: 0.1-0.3
+            if (config.TryGetValue("emissivity", out string? emissivityStr))
+            {
+                if (float.TryParse(emissivityStr, out float emissivity))
+                {
+                    emissivity = Math.Clamp(emissivity, 0.1f, 1.0f);
+                    _meadowSensor.Emissivity = emissivity;
+                    CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                        $"MLX90640 emissivity set to: {emissivity:F2}");
+                }
+            }
+
+            // Configure frame rate if specified
+            if (config.TryGetValue("framerate", out string? frameRateStr))
+            {
+                var refreshRate = ParseRefreshRate(frameRateStr);
+                if (refreshRate.HasValue)
+                {
+                    _meadowSensor.SetRefreshRate(refreshRate.Value);
+                    CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                        $"MLX90640 refresh rate set to: {_meadowSensor.GetRefreshRate()}");
+                }
+                else
+                {
+                    CustomLogger.Log(this, CustomLogger.LogLevel.Warning, 
+                        $"Invalid framerate value: {frameRateStr}. Using default.");
+                }
+            }
 
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-                $"MLX90640 initialized using Meadow.Foundation library");
+                $"MLX90640 initialized using Meadow.Foundation library. Serial number: {_meadowSensor.SerialNumber}");
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                $"Current settings - Frame rate: {_meadowSensor.GetRefreshRate()}, Emissivity: {_meadowSensor.Emissivity:F2}");
 
             Initialized = true;
         }
@@ -91,6 +129,25 @@ public class MLX90640 : II2CThermalSensor
         {
             throw new InvalidOperationException($"Failed to initialize MLX90640 sensor: {ex.Message}", ex);
         }
+    }
+
+    private Mlx90640.RefreshRate? ParseRefreshRate(string value)
+    {
+        // Remove "Hz" suffix if present and parse
+        var normalized = value.Replace("Hz", "").Replace("hz", "").Trim();
+        
+        return normalized switch
+        {
+            "0.5" => Mlx90640.RefreshRate._0_5hz,
+            "1" => Mlx90640.RefreshRate._1hz,
+            "2" => Mlx90640.RefreshRate._2hz,
+            "4" => Mlx90640.RefreshRate._4hz,
+            "8" => Mlx90640.RefreshRate._8hz,
+            "16" => Mlx90640.RefreshRate._16hz,
+            "32" => Mlx90640.RefreshRate._32hz,
+            "64" => Mlx90640.RefreshRate._64hz,
+            _ => null
+        };
     }
 
     public override Specifications CurrentSpecifications()
@@ -111,6 +168,9 @@ public class MLX90640 : II2CThermalSensor
 
             // Read frame from Meadow sensor
             var frame = _meadowSensor.ReadRawData();
+
+            //CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+            //    $"MLX90640 emissivity: {_meadowSensor.Emissivity:F2}, reflected temp: {_meadowSensor.ReflectedTemperature}");
 
             // Convert to 2D array
             for (int y = 0; y < SensorHeight; y++)
