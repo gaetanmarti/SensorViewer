@@ -25,6 +25,7 @@
   let loading = $state(true);
   let error = $state(null);
   let pollInterval = null;
+  let isPageVisible = $state(true);
   let activeTab = $state('grid'); // 'grid' or '3d'
   
   // 3D view controls
@@ -202,19 +203,56 @@
     };
   }
 
+  /**
+   * Start polling measurements
+   */
+  function startPolling() {
+    if (!pollInterval && isPageVisible) {
+      pollInterval = setInterval(fetchMeasurements, POLLING_INTERVALS.I2C_DISTANCE_SENSORS);
+    }
+  }
+
+  /**
+   * Stop polling measurements
+   */
+  function stopPolling() {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+  }
+
+  /**
+   * Handle visibility change (tab switching)
+   */
+  function handleVisibilityChange() {
+    isPageVisible = !document.hidden;
+    
+    if (isPageVisible) {
+      // Resume polling when tab becomes visible
+      fetchMeasurements();
+      startPolling();
+    } else {
+      // Stop polling when tab is hidden
+      stopPolling();
+    }
+  }
+
   onMount(async () => {
     // Fetch specifications once on mount
     await fetchSpecifications();
     
     // Start polling for measurements
     await fetchMeasurements();
-    pollInterval = setInterval(fetchMeasurements, POLLING_INTERVALS.I2C_DISTANCE_SENSORS);
+    startPolling();
+    
+    // Listen for visibility changes
+    document.addEventListener('visibilitychange', handleVisibilityChange);
   });
 
   onDestroy(() => {
-    if (pollInterval) {
-      clearInterval(pollInterval);
-    }
+    stopPolling();
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
   });
 </script>
 

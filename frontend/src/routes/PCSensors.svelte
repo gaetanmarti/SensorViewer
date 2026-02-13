@@ -3,10 +3,11 @@
   import { API_BASE_URL } from "../lib/config.js";
   import SensorCard from "../components/SensorCard.svelte";
 
-  let sensors = [];
-  let loading = true;
-  let error = null;
+  let sensors = $state([]);
+  let loading = $state(true);
+  let error = $state(null);
   let intervalId = null;
+  let isPageVisible = $state(true);
   
   // Historique des valeurs pour chaque capteur (max 30 points = 150 secondes)
   let sensorHistory = {};
@@ -47,18 +48,55 @@
     }
   }
 
+  /**
+   * Start polling sensors
+   */
+  function startPolling() {
+    if (!intervalId && isPageVisible) {
+      intervalId = setInterval(fetchSensors, 5000);
+    }
+  }
+
+  /**
+   * Stop polling sensors
+   */
+  function stopPolling() {
+    if (intervalId) {
+      clearInterval(intervalId);
+      intervalId = null;
+    }
+  }
+
+  /**
+   * Handle visibility change (tab switching)
+   */
+  function handleVisibilityChange() {
+    isPageVisible = !document.hidden;
+    
+    if (isPageVisible) {
+      // Resume polling when tab becomes visible
+      fetchSensors();
+      startPolling();
+    } else {
+      // Stop polling when tab is hidden
+      stopPolling();
+    }
+  }
+
   onMount(() => {
     // Première récupération immédiate
     fetchSensors();
     
     // Ensuite toutes les 5 secondes
-    intervalId = setInterval(fetchSensors, 5000);
+    startPolling();
+    
+    // Listen for visibility changes
+    document.addEventListener('visibilitychange', handleVisibilityChange);
   });
 
   onDestroy(() => {
-    if (intervalId) {
-      clearInterval(intervalId);
-    }
+    stopPolling();
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
   });
 </script>
 

@@ -14,6 +14,7 @@ public class ManagerI2C
         RegisterDevice(new VL53L5CX());
         RegisterDevice(new AMG88xx(AMG88xx.DefaultAddress));
         RegisterDevice(new AMG88xx(AMG88xx.AlternateAddress));
+        RegisterDevice(new MLX90640()); // Using Meadow.Foundation library
     }
     
     private readonly int _busId;

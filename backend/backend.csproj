@@ -10,5 +10,6 @@
     <PackageReference Include="System.Management" Version="10.0.2" />
     <PackageReference Include="Iot.Device.Bindings" Version="4.1.0" />
     <PackageReference Include="System.Device.Gpio" Version="4.1.0" />
+    <PackageReference Include="Meadow.Foundation.Sensors.Camera.Mlx90640" Version="1.14.0" />
   </ItemGroup>
 </Project>
