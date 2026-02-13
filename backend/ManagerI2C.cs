@@ -12,8 +12,10 @@ public class ManagerI2C
 
         RegisterDevice(new TMF882X());
         RegisterDevice(new VL53L5CX());
+        RegisterDevice(new AMG88xx(AMG88xx.DefaultAddress));
+        RegisterDevice(new AMG88xx(AMG88xx.AlternateAddress));
     }
-
+    
     private readonly int _busId;
 
     public Dictionary<int, List<II2CDevice>> Devices {get;private set;} = [];
@@ -58,6 +60,35 @@ public class ManagerI2C
         }
 
         return devices;
+    }
+
+    /// <summary>
+    /// Try to resolve a device by address, detecting it on the bus if needed.
+    /// </summary>
+    public bool TryGetDevice(int address, out II2CDevice? device, CancellationToken token = default)
+    {
+        device = null;
+
+        if (!Devices.TryGetValue(address, out List<II2CDevice>? value))
+            return false;
+
+        foreach (var dev in value)
+        {
+            token.ThrowIfCancellationRequested();
+            switch (dev.Status)
+            {
+                case II2CDevice.DeviceStatus.Unknown:
+                case II2CDevice.DeviceStatus.Detected:
+                    dev.Initialize([], _busId, token);
+                    break;
+            }
+            if (dev.Status != II2CDevice.DeviceStatus.Initialized)
+                return false;
+            
+            device = dev;
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -129,15 +160,30 @@ public class ManagerI2C
             if (!TryParseI2cAddress(address, out int addr))
                 return Results.BadRequest(new { ok = false, error = "Invalid I2C address." });
 
-            if (!TryGetDistanceSensor(addr, out var sensor, context.RequestAborted) || sensor == null)
-                return Results.NotFound(new { ok = false, error = "Distance sensor not found." });
+            if (!TryGetDevice(addr, out var device, context.RequestAborted) || device == null)
+                return Results.NotFound(new { ok = false, error = "Device not found." });
 
-            var specs = sensor.CurrentSpecifications();
+            // Check if device supports specifications (distance or thermal sensor)
+            object? specs = null;
+            if (device is II2CDistanceSensor distanceSensor)
+            {
+                specs = distanceSensor.CurrentSpecifications();
+            }
+            else if (device is II2CThermalSensor thermalSensor)
+            {
+                specs = thermalSensor.CurrentSpecifications();
+            }
+            else
+            {
+                return Results.Json(new { ok = false, error = "Device does not support specifications." });
+            }
+
             return Results.Json(new
             {
                 ok = true,
-                address = sensor.Address,
-                name = sensor.Name,
+                address = device.Address,
+                name = device.Name,
+                type = device.Type.ToString(),
                 specifications = specs
             });
         }
@@ -160,19 +206,55 @@ public class ManagerI2C
             if (!TryParseI2cAddress(address, out int addr))
                 return Results.BadRequest(new { ok = false, error = "Invalid I2C address." });
 
-            if (!TryGetDistanceSensor(addr, out var sensor, context.RequestAborted) || sensor == null)
-                return Results.NotFound(new { ok = false, error = "Distance sensor not found." });
+            if (!TryGetDevice(addr, out var device, context.RequestAborted) || device == null)
+                return Results.NotFound(new { ok = false, error = "Device not found." });
 
-            var measurement = sensor.ReadOnce(token: context.RequestAborted)
-                .Select(m => new { distMM = m.distMM, confidence = Math.Round(m.confidence, 3) })
-                .ToList();
-            return Results.Json(new
+            // Handle distance sensors
+            if (device is II2CDistanceSensor distanceSensor)
             {
-                ok = true,
-                address = sensor.Address,
-                name = sensor.Name,
-                measurement
-            });
+                var measurement = distanceSensor.ReadOnce(token: context.RequestAborted)
+                    .Select(m => new { distMM = m.distMM, confidence = Math.Round(m.confidence, 3) })
+                    .ToList();
+                return Results.Json(new
+                {
+                    ok = true,
+                    address = device.Address,
+                    name = device.Name,
+                    type = device.Type.ToString(),
+                    measurement
+                });
+            }
+            // Handle thermal sensors
+            else if (device is II2CThermalSensor thermalSensor)
+            {
+                var temps = thermalSensor.ReadOnce(token: context.RequestAborted);
+                int height = temps.GetLength(0);
+                int width = temps.GetLength(1);
+                
+                // Convert 2D array to jagged array for JSON serialization
+                var temperatures = new float[height][];
+                for (int y = 0; y < height; y++)
+                {
+                    temperatures[y] = new float[width];
+                    for (int x = 0; x < width; x++)
+                    {
+                        temperatures[y][x] = (float)Math.Round(temps[y, x], 2);
+                    }
+                }
+                
+                return Results.Json(new
+                {
+                    ok = true,
+                    address = device.Address,
+                    name = device.Name,
+                    type = device.Type.ToString(),
+                    measurement = new { temperatures }
+                });
+            }
+            else
+            {
+                return Results.Json(new { ok = false, error = "Device does not support measurements." });
+            }
         }
         catch (OperationCanceledException)
         {

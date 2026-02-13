@@ -5,6 +5,7 @@
    * Scans and displays all detected I2C devices on the bus.
    * Automatically renders appropriate widgets based on device type:
    * - Distance sensors: DistanceSensor component with live measurements
+   * - Thermal sensors: ThermalSensor component with thermal imaging
    * - Unknown/unsupported devices: UnknownSensor component with basic info
    * 
    * Features:
@@ -20,6 +21,7 @@
   import { API_BASE_URL, API_ENDPOINTS } from '../lib/config.js';
   import UnknownSensor from '../components/UnknownSensor.svelte';
   import DistanceSensor from '../components/DistanceSensor.svelte';
+  import ThermalSensor from '../components/ThermalSensor.svelte';
 
   let devices = $state([]);
   let loading = $state(true);
@@ -63,14 +65,16 @@
 
   /**
    * Get appropriate component for device type
-   * @param {string} type - Device type (e.g., "Distance", "Temperature")
-   * @returns {Component} Svelte component to render
+   * @param {string} type - Device type (e.g., "Distance", "Thermal")
+   * @returns {*} Svelte component to render
    */
   function getComponentForDevice(type) {
     // Map device types to their respective components
     switch (type?.toLowerCase()) {
       case 'distance':
         return DistanceSensor;
+      case 'thermal':
+        return ThermalSensor;
       default:
         return UnknownSensor;
     }
@@ -123,6 +127,8 @@
       {#each devices as device (device.address)}
         {#if getComponentForDevice(device.type) === DistanceSensor}
           <DistanceSensor {device} />
+        {:else if getComponentForDevice(device.type) === ThermalSensor}
+          <ThermalSensor {device} />
         {:else}
           <UnknownSensor {device} />
         {/if}

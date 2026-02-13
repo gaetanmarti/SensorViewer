@@ -41,6 +41,11 @@ public class I2C : IDisposable
         return Device.ConnectionSettings.DeviceAddress;
     } }
 
+    /// <summary>
+    /// Get the underlying I2cDevice for use with external drivers.
+    /// </summary>
+    public I2cDevice GetI2cDevice() => Device;
+
     public static bool Verbose {get;set;} = false;
 
     public bool Ping (CancellationToken token = default)

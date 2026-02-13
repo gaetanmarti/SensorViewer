@@ -24,6 +24,7 @@ public abstract class II2CDevice (int address)
     public enum DeviceType {
         Unknown = 0,
         Distance = 1,
+        Thermal = 2,
     }
 
     /// <summary>
@@ -178,6 +179,46 @@ public abstract class II2CDistanceSensor : II2CDevice
     /// <param name="token">Optional cancellation token.</param>
     /// <returns>A list of (distance in mm, confidence) tuples representing the sensor measurement.</returns>
     public abstract List<(int distMM, float confidence)> ReadOnce(int TimeoutMs = 1000, CancellationToken token = default);
+}
+
+/// <summary>
+/// Base class for I2C thermal sensors.
+/// </summary>
+/// <remarks>
+/// Implementors should provide sensor specifications in <see cref="CurrentSpecifications"/> and implement measurement logic in <see cref="ReadOnce"/>.
+/// </remarks>
+public abstract class II2CThermalSensor : II2CDevice
+{
+    public II2CThermalSensor(int address) : base(address)
+    {
+        Type = DeviceType.Thermal;
+    }
+
+    /// <summary>
+    /// Thermal sensor specifications configuration.
+    /// </summary>
+    /// <param name="Width">Width of the thermal array (number of columns).</param>
+    /// <param name="Height">Height of the thermal array (number of rows).</param>
+    /// <param name="UpdateRateHz">Update rate in Hz.</param>
+    /// <param name="VerticalFOVDeg">Vertical field of view in degrees.</param>
+    /// <param name="HorizontalFOVDeg">Horizontal field of view in degrees.</param>
+    /// <param name="MinTempCelsius">Minimum measurable temperature in Celsius.</param>
+    /// <param name="MaxTempCelsius">Maximum measurable temperature in Celsius.</param>
+    /// <param name="ResolutionCelsius">Temperature resolution in Celsius.</param>
+    public record Specifications(int Width, int Height, float UpdateRateHz, float VerticalFOVDeg, float HorizontalFOVDeg, float MinTempCelsius, float MaxTempCelsius, float ResolutionCelsius);
+    
+    /// <summary>
+    /// Get the current sensor specifications.
+    /// </summary>
+    public abstract Specifications CurrentSpecifications();
+    
+    /// <summary>
+    /// Read a single thermal measurement from the sensor, returning a 2D array of temperatures in Celsius.
+    /// </summary>
+    /// <param name="TimeoutMs">Maximum time to wait for a measurement in milliseconds (default: 1000ms).</param>
+    /// <param name="token">Optional cancellation token.</param>
+    /// <returns>A 2D array of temperatures in Celsius. The array dimensions match the sensor specifications (Height x Width).</returns>
+    public abstract float[,] ReadOnce(int TimeoutMs = 1000, CancellationToken token = default);
 }
 
 // Fallback class for unknown devices that respond on the bus but do not match any known device signature
