@@ -23,6 +23,9 @@ export const POLLING_INTERVALS = {
   
   // I2C thermal sensors polling interval (1000ms = every 1 second)
   I2C_THERMAL_SENSORS: 250,
+  
+  // I2C human presence sensors polling interval (250ms)
+  I2C_HUMAN_PRESENCE_SENSORS: 250,
 };
 
 /**
@@ -54,5 +57,5 @@ export const API_ENDPOINTS = {
   // I2C endpoints
   I2C_DEVICES: '/api/i2c/devices',
   I2C_DEVICE_SPECIFICATIONS: (address) => `/api/i2c/device/${address}/specifications`,
-  I2C_DEVICE_MEASURE: (address) => `/api/i2c/device/${address}/measure`,
+  I2C_DEVICE_MEASURE: (address) => `/api/i2c/device/${address}/data`,
 };

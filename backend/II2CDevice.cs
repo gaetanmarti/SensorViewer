@@ -25,6 +25,7 @@ public abstract class II2CDevice (int address)
         Unknown = 0,
         Distance = 1,
         Thermal = 2,
+        HumanPresence = 3,
     }
 
     /// <summary>
@@ -219,6 +220,75 @@ public abstract class II2CThermalSensor : II2CDevice
     /// <param name="token">Optional cancellation token.</param>
     /// <returns>A 2D array of temperatures in Celsius. The array dimensions match the sensor specifications (Height x Width).</returns>
     public abstract float[,] ReadOnce(int TimeoutMs = 1000, CancellationToken token = default);
+}
+
+/// <summary>
+/// Base class for I2C human presence sensors.
+/// </summary>
+/// <remarks>
+/// Implementors should provide sensor specifications in <see cref="CurrentSpecifications"/> and implement measurement logic in <see cref="ReadOnce"/>.
+/// </remarks>
+public abstract class II2CHumanPresenceSensor : II2CDevice
+{
+    public II2CHumanPresenceSensor(int address) : base(address)
+    {
+        Type = DeviceType.HumanPresence;
+    }
+
+    /// <summary>
+    /// Human presence sensor measurement data.
+    /// </summary>
+    /// <param name="PresenceDetected">True if human presence is detected.</param>
+    /// <param name="MotionDetected">True if motion is detected.</param>
+    /// <param name="AmbientShockDetected">True if ambient temperature shock is detected.</param>
+    /// <param name="AmbientTemperatureCelsius">Ambient temperature in Celsius.</param>
+    /// <param name="ObjectTemperatureCelsius">Absolute object (human) temperature in Celsius.</param>
+    /// <param name="PresenceValue">Raw presence value (sensor-specific).</param>
+    /// <param name="MotionValue">Raw motion value (sensor-specific).</param>
+    /// <param name="AmbientShockValue">Raw ambient shock value (sensor-specific).</param>
+    public record PresenceMeasurement(
+        bool PresenceDetected,
+        bool MotionDetected,
+        bool AmbientShockDetected,
+        float AmbientTemperatureCelsius,
+        float ObjectTemperatureCelsius,
+        int PresenceValue,
+        int MotionValue,
+        int AmbientShockValue
+    );
+
+    /// <summary>
+    /// Human presence sensor specifications configuration.
+    /// </summary>
+    /// <param name="UpdateRateHz">Update rate in Hz.</param>
+    /// <param name="VerticalFOVDeg">Vertical field of view in degrees.</param>
+    /// <param name="HorizontalFOVDeg">Horizontal field of view in degrees.</param>
+    /// <param name="MinTempCelsius">Minimum measurable temperature in Celsius.</param>
+    /// <param name="MaxTempCelsius">Maximum measurable temperature in Celsius.</param>
+    /// <param name="ResolutionCelsius">Temperature resolution in Celsius.</param>
+    /// <param name="DetectionRangeMeters">Maximum detection range in meters.</param>
+    public record Specifications(
+        float UpdateRateHz,
+        float VerticalFOVDeg,
+        float HorizontalFOVDeg,
+        float MinTempCelsius,
+        float MaxTempCelsius,
+        float ResolutionCelsius,
+        float DetectionRangeMeters
+    );
+
+    /// <summary>
+    /// Get the current sensor specifications.
+    /// </summary>
+    public abstract Specifications CurrentSpecifications();
+
+    /// <summary>
+    /// Read a single presence measurement from the sensor.
+    /// </summary>
+    /// <param name="TimeoutMs">Maximum time to wait for a measurement in milliseconds (default: 1000ms).</param>
+    /// <param name="token">Optional cancellation token.</param>
+    /// <returns>A PresenceMeasurement record containing presence, motion, and temperature data.</returns>
+    public abstract PresenceMeasurement ReadOnce(int TimeoutMs = 1000, CancellationToken token = default);
 }
 
 // Fallback class for unknown devices that respond on the bus but do not match any known device signature

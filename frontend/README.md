@@ -46,7 +46,7 @@ The frontend connects to the backend API running on `http://localhost:8080`:
 ### I2C Sensors
 - `/api/i2c/devices`: Scan and list all I2C devices on the bus
 - `/api/i2c/device/{address}/specifications`: Get device specifications (grid size, FOV, update rate)
-- `/api/i2c/device/{address}/measure`: Get live distance measurements (refreshed every 1 second)
+- `/api/i2c/device/{address}/data`: Get live sensor measurements
 
 See the [backend API documentation](../backend/API.md) for complete API details.
 

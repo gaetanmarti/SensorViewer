@@ -73,11 +73,11 @@ public class Program
             }
         });
 
-        app.MapGet("/api/i2c/device/{address}/measure", (HttpContext context, string address) =>
+        app.MapGet("/api/i2c/device/{address}/data", (HttpContext context, string address) =>
         {
             lock (_i2cLock)
             {
-                return Global.ManagerI2C.DeviceMeasureDelegate(context, address);
+                return Global.ManagerI2C.DeviceDataDelegate(context, address);
             }
         });
 

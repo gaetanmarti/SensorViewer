@@ -22,6 +22,7 @@
   import UnknownSensor from '../components/UnknownSensor.svelte';
   import DistanceSensor from '../components/DistanceSensor.svelte';
   import ThermalSensor from '../components/ThermalSensor.svelte';
+  import HumanPresenceSensor from '../components/HumanPresenceSensor.svelte';
 
   let devices = $state([]);
   let loading = $state(true);
@@ -65,7 +66,7 @@
 
   /**
    * Get appropriate component for device type
-   * @param {string} type - Device type (e.g., "Distance", "Thermal")
+   * @param {string} type - Device type (e.g., "Distance", "Thermal", "HumanPresence")
    * @returns {*} Svelte component to render
    */
   function getComponentForDevice(type) {
@@ -75,6 +76,8 @@
         return DistanceSensor;
       case 'thermal':
         return ThermalSensor;
+      case 'humanpresence':
+        return HumanPresenceSensor;
       default:
         return UnknownSensor;
     }
@@ -129,6 +132,8 @@
           <DistanceSensor {device} />
         {:else if getComponentForDevice(device.type) === ThermalSensor}
           <ThermalSensor {device} />
+        {:else if getComponentForDevice(device.type) === HumanPresenceSensor}
+          <HumanPresenceSensor {device} />
         {:else}
           <UnknownSensor {device} />
         {/if}

@@ -114,7 +114,8 @@ Return the list of detected I2C devices with:
 - **Type**: Device type. Current supported types:
   - `"Unknown"` - Unrecognized device
   - `"Distance"` - Distance/ToF sensors (VL53L5CX, TMF882X)
-  - `"Thermal"` - Thermal/infrared cameras (AMG8833)
+  - `"Thermal"` - Thermal/infrared cameras (AMG8833, MLX90640)
+  - `"HumanPresence"` - Human presence and motion sensors (STHS34PF80)
 
 ##### Error responses:
 
@@ -129,6 +130,7 @@ curl -X GET http://localhost:8080/api/i2c/devices
 # Example response with multiple device types:
 {"ok":true,"devices":[
   {"address":65,"name":"TMF882X Time-of-Flight Sensor","type":"Distance"},
+  {"address":90,"name":"STHS34PF80","type":"HumanPresence"},
   {"address":105,"name":"AMG8833 Thermal Camera (Grid-EYE)","type":"Thermal"}
 ]}
 ```
@@ -137,7 +139,7 @@ curl -X GET http://localhost:8080/api/i2c/devices
 
 #### `GET /api/i2c/device/{address}/specifications`
 
-Return the specification record for a sensor at the given I2C address (works with distance and thermal sensors).
+Return the specification record for a sensor at the given I2C address (works with distance, thermal, and human presence sensors).
 
 ##### Parameters:
 
@@ -182,6 +184,26 @@ Return the specification record for a sensor at the given I2C address (works wit
 }
 ```
 
+##### Response (200 OK) - Human Presence Sensor:
+
+```json
+{
+  "ok": true,
+  "address": 90,
+  "name": "STHS34PF80",
+  "type": "HumanPresence",
+  "specifications": {
+    "updateRateHz": 4,
+    "verticalFOVDeg": 80,
+    "horizontalFOVDeg": 80,
+    "minTempCelsius": -10,
+    "maxTempCelsius": 60,
+    "resolutionCelsius": 0.01,
+    "detectionRangeMeters": 4
+  }
+}
+```
+
 ##### Error responses:
 
 - `400`: Invalid I2C address
@@ -197,13 +219,16 @@ curl -X GET http://localhost:8080/api/i2c/device/0x41/specifications
 
 # Thermal sensor
 curl -X GET http://localhost:8080/api/i2c/device/0x69/specifications
+
+# Human presence sensor
+curl -X GET http://localhost:8080/api/i2c/device/0x5A/specifications
 ```
 
 ---
 
-#### `GET /api/i2c/device/{address}/measure`
+#### `GET /api/i2c/device/{address}/data`
 
-Return a single measurement from the specified sensor (works with distance and thermal sensors).
+Return a single measurement from the specified sensor (works with distance, thermal, and human presence sensors).
 
 ##### Parameters:
 
@@ -249,6 +274,46 @@ Return a single measurement from the specified sensor (works with distance and t
 
 Note: For thermal sensors, `temperatures` is a 2D array where each element represents the temperature in Celsius at that pixel location. Array dimensions match the sensor specifications (e.g., 8x8 for AMG8833).
 
+##### Response (200 OK) - Human Presence Sensor:
+
+```json
+{
+  "ok": true,
+  "address": 90,
+  "name": "STHS34PF80",
+  "type": "HumanPresence",
+  "measurement": {
+    "presenceDetected": true,
+    "motionDetected": false,
+    "ambientShockDetected": false,
+    "ambientTemperatureCelsius": 23.45,
+    "objectTemperatureCelsius": 33.21,
+    "presenceValue": 1250,
+    "motionValue": 45,
+    "ambientShockValue": 12
+  }
+}
+```
+
+Note: For human presence sensors, the measurement includes:
+- `presenceDetected`: Boolean indicating if human presence is detected (true when presenceValue exceeds the configured threshold)
+- `motionDetected`: Boolean indicating if motion is detected (true when motionValue exceeds the configured threshold)
+- `ambientShockDetected`: Boolean indicating if ambient temperature shock is detected (true when ambientShockValue exceeds the configured threshold)
+- `ambientTemperatureCelsius`: Ambient temperature measurement
+- `objectTemperatureCelsius`: Absolute object (human) temperature measurement in Celsius
+- `presenceValue`: Raw presence signature value in 0.01°C units (e.g., 200 = 2.00°C)
+- `motionValue`: Raw motion signature value in 0.01°C units
+- `ambientShockValue`: Raw ambient shock value in 0.01°C units
+
+**Detection Thresholds:**
+The STHS34PF80 sensor uses configurable thresholds to determine when to set the detection flags:
+- `presenceThreshold`: Default 200 (2.00°C) - Minimum thermal signature to detect human presence
+- `motionThreshold`: Default 200 (2.00°C) - Minimum thermal signature change to detect motion
+- `ambientShockThreshold`: Default 200 (2.00°C) - Minimum ambient temperature change to detect shock
+
+These thresholds can be configured during sensor initialization via the `config` dictionary.
+The raw values (`presenceValue`, `motionValue`, `ambientShockValue`) are always available regardless of threshold configuration.
+
 ##### Error responses:
 
 - `400`: Invalid I2C address
@@ -261,10 +326,13 @@ Note: For thermal sensors, `temperatures` is a 2D array where each element repre
 
 ```bash
 # Distance sensor
-curl -X GET http://localhost:8080/api/i2c/device/0x41/measure
+curl -X GET http://localhost:8080/api/i2c/device/0x41/data
 
 # Thermal sensor
-curl -X GET http://localhost:8080/api/i2c/device/0x69/measure
+curl -X GET http://localhost:8080/api/i2c/device/0x69/data
+
+# Human presence sensor
+curl -X GET http://localhost:8080/api/i2c/device/0x5A/data
 ```
 
 ---

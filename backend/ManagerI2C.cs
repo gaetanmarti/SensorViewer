@@ -15,6 +15,7 @@ public class ManagerI2C
         RegisterDevice(new AMG88xx(AMG88xx.DefaultAddress));
         RegisterDevice(new AMG88xx(AMG88xx.AlternateAddress));
         RegisterDevice(new MLX90640()); // Using Meadow.Foundation library
+        RegisterDevice(new STHS34PF80());
     }
     
     private readonly int _busId;
@@ -164,7 +165,7 @@ public class ManagerI2C
             if (!TryGetDevice(addr, out var device, context.RequestAborted) || device == null)
                 return Results.NotFound(new { ok = false, error = "Device not found." });
 
-            // Check if device supports specifications (distance or thermal sensor)
+            // Check if device supports specifications (distance, thermal, or human presence sensor)
             object? specs = null;
             if (device is II2CDistanceSensor distanceSensor)
             {
@@ -173,6 +174,10 @@ public class ManagerI2C
             else if (device is II2CThermalSensor thermalSensor)
             {
                 specs = thermalSensor.CurrentSpecifications();
+            }
+            else if (device is II2CHumanPresenceSensor presenceSensor)
+            {
+                specs = presenceSensor.CurrentSpecifications();
             }
             else
             {
@@ -199,8 +204,8 @@ public class ManagerI2C
         }
     }
 
-    // API endpoint delegate to get device measurement
-    public IResult DeviceMeasureDelegate(HttpContext context, string address)
+    // API endpoint delegate to get device data
+    public IResult DeviceDataDelegate(HttpContext context, string address)
     {
         try
         {
@@ -252,9 +257,32 @@ public class ManagerI2C
                     measurement = new { temperatures }
                 });
             }
+            // Handle human presence sensors
+            else if (device is II2CHumanPresenceSensor presenceSensor)
+            {
+                var data = presenceSensor.ReadOnce(token: context.RequestAborted);
+                return Results.Json(new
+                {
+                    ok = true,
+                    address = device.Address,
+                    name = device.Name,
+                    type = device.Type.ToString(),
+                    measurement = new
+                    {
+                        presenceDetected = data.PresenceDetected,
+                        motionDetected = data.MotionDetected,
+                        ambientShockDetected = data.AmbientShockDetected,
+                        ambientTemperatureCelsius = Math.Round(data.AmbientTemperatureCelsius, 2),
+                        objectTemperatureCelsius = Math.Round(data.ObjectTemperatureCelsius, 2),
+                        presenceValue = data.PresenceValue,
+                        motionValue = data.MotionValue,
+                        ambientShockValue = data.AmbientShockValue
+                    }
+                });
+            }
             else
             {
-                return Results.Json(new { ok = false, error = "Device does not support measurements." });
+                return Results.Json(new { ok = false, error = "Device does not support data readings." });
             }
         }
         catch (OperationCanceledException)
@@ -263,12 +291,12 @@ public class ManagerI2C
         }
         catch (TimeoutException ex)
         {
-            CustomLogger.Log(this, CustomLogger.LogLevel.Warning, $"Timeout in DeviceMeasureDelegate: {ex.Message}");
-            return Results.Json(new { ok = false, error = "Measurement timeout.", details = ex.Message });
+            CustomLogger.Log(this, CustomLogger.LogLevel.Warning, $"Timeout in DeviceDataDelegate: {ex.Message}");
+            return Results.Json(new { ok = false, error = "Data read timeout.", details = ex.Message });
         }
         catch (Exception ex)
         {
-            CustomLogger.Log(this, CustomLogger.LogLevel.Error, $"Error in DeviceMeasureDelegate: {ex.Message}");
+            CustomLogger.Log(this, CustomLogger.LogLevel.Error, $"Error in DeviceDataDelegate: {ex.Message}");
             return Results.Json(new { ok = false, error = "Internal server error.", details = ex.Message });
         }
     }
