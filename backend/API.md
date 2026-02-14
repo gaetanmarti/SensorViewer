@@ -305,13 +305,20 @@ Note: For human presence sensors, the measurement includes:
 - `motionValue`: Raw motion signature value in 0.01°C units
 - `ambientShockValue`: Raw ambient shock value in 0.01°C units
 
-**Detection Thresholds:**
-The STHS34PF80 sensor uses configurable thresholds to determine when to set the detection flags:
-- `presenceThreshold`: Default 200 (2.00°C) - Minimum thermal signature to detect human presence
-- `motionThreshold`: Default 200 (2.00°C) - Minimum thermal signature change to detect motion
+**Detection Configuration:**
+The STHS34PF80 sensor uses configurable thresholds and hysteresis to determine when to set the detection flags.
+
+*Thresholds* (values in 0.01°C units):
+- `presenceThreshold`: Default 150 (1.50°C) - Minimum thermal signature to detect human presence
+- `motionThreshold`: Default 150 (1.50°C) - Minimum thermal signature change to detect motion
 - `ambientShockThreshold`: Default 200 (2.00°C) - Minimum ambient temperature change to detect shock
 
-These thresholds can be configured during sensor initialization via the `config` dictionary.
+*Hysteresis* (prevents false oscillations, values in 0.01°C units):
+- `presenceHysteresis`: Default 50 (0.50°C) - Once detected, presence must drop below (threshold - hysteresis) to clear
+- `motionHysteresis`: Default 50 (0.50°C) - Once detected, motion must drop below (threshold - hysteresis) to clear
+- `ambientShockHysteresis`: Default 50 (0.50°C) - Once detected, shock must drop below (threshold - hysteresis) to clear
+
+These parameters can be configured during sensor initialization via the `config` dictionary.
 The raw values (`presenceValue`, `motionValue`, `ambientShockValue`) are always available regardless of threshold configuration.
 
 ##### Error responses:

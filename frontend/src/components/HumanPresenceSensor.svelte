@@ -17,6 +17,7 @@
    */
 
   import { onMount, onDestroy } from 'svelte';
+  import { Chart } from 'chart.js/auto';
   import { API_BASE_URL, API_ENDPOINTS, POLLING_INTERVALS } from '../lib/config.js';
 
   let { device } = $props();
@@ -28,12 +29,22 @@
   let pollInterval = null;
   let isPageVisible = $state(true);
   
-  // History for graphs (keep last 50 measurements)
-  const MAX_HISTORY = 50;
+  // History for graphs (keep last 100 measurements)
+  const MAX_HISTORY = 100;
   let presenceHistory = $state([]);
   let motionHistory = $state([]);
   let objectTempHistory = $state([]);
   let ambientShockHistory = $state([]);
+
+  // Chart.js instances
+  let presenceCanvas;
+  let motionCanvas;
+  let objectTempCanvas;
+  let ambientShockCanvas;
+  let presenceChart;
+  let motionChart;
+  let objectTempChart;
+  let ambientShockChart;
 
   /**
    * Fetch sensor specifications
@@ -98,48 +109,68 @@
   }
 
   /**
-   * Generate SVG path for a line chart
-   * @param {number[]} data - Array of data points
-   * @param {number} width - Chart width
-   * @param {number} height - Chart height
-   * @param {number} minVal - Minimum value for scaling
-   * @param {number} maxVal - Maximum value for scaling
-   * @returns {string} SVG path string
+   * Create a Chart.js chart
    */
-  function generatePath(data, width, height, minVal, maxVal) {
-    if (data.length === 0) return '';
+  function createChart(canvas, color, label) {
+    if (!canvas) return null;
     
-    const range = maxVal - minVal;
-    const step = width / Math.max(data.length - 1, 1);
+    const ctx = canvas.getContext('2d');
     
-    const points = data.map((value, index) => {
-      const x = index * step;
-      const y = range === 0 ? height / 2 : height - ((value - minVal) / range) * height;
-      return `${x},${y}`;
+    return new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          data: [],
+          borderColor: color,
+          backgroundColor: color.replace('1)', '0.2)'),
+          borderWidth: 2,
+          tension: 0.4,
+          pointRadius: 2,
+          pointHoverRadius: 4,
+          fill: true,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { 
+            enabled: true,
+            callbacks: {
+              label: (context) => `${label}: ${context.parsed.y.toFixed(2)}`
+            }
+          }
+        },
+        scales: {
+          x: { display: false },
+          y: {
+            display: true,
+            position: 'right',
+            ticks: {
+              font: { size: 10 },
+              color: '#9CA3AF'
+            },
+            grid: {
+              color: 'rgba(156, 163, 175, 0.1)'
+            }
+          }
+        },
+        animation: false,
+      }
     });
-    
-    return `M ${points.join(' L ')}`;
   }
 
   /**
-   * Get min/max values for a dataset
-   * @param {number[]} data - Array of data points
-   * @param {number} defaultMin - Default minimum if data is empty
-   * @param {number} defaultMax - Default maximum if data is empty
-   * @returns {Object} Object with min and max properties
+   * Update a chart with new data
    */
-  function getMinMax(data, defaultMin = 0, defaultMax = 100) {
-    if (data.length === 0) return { min: defaultMin, max: defaultMax };
+  function updateChart(chart, data) {
+    if (!chart || !data || data.length === 0) return;
     
-    const min = Math.min(...data);
-    const max = Math.max(...data);
-    
-    // Add 10% padding
-    const padding = (max - min) * 0.1;
-    return {
-      min: min - padding,
-      max: max + padding
-    };
+    chart.data.labels = Array(data.length).fill('');
+    chart.data.datasets[0].data = [...data];
+    chart.update('none');
   }
 
   /**
@@ -199,11 +230,48 @@
     startPolling();
     
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Create charts
+    presenceChart = createChart(presenceCanvas, 'rgba(16, 185, 129, 1)', 'Presence');
+    motionChart = createChart(motionCanvas, 'rgba(234, 179, 8, 1)', 'Motion');
+    objectTempChart = createChart(objectTempCanvas, 'rgba(239, 68, 68, 1)', 'Object Temp');
+    ambientShockChart = createChart(ambientShockCanvas, 'rgba(249, 115, 22, 1)', 'Ambient Shock');
   });
 
   onDestroy(() => {
     stopPolling();
     document.removeEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Destroy charts
+    if (presenceChart) presenceChart.destroy();
+    if (motionChart) motionChart.destroy();
+    if (objectTempChart) objectTempChart.destroy();
+    if (ambientShockChart) ambientShockChart.destroy();
+  });
+
+  // Update charts when history changes
+  $effect(() => {
+    if (presenceHistory.length > 0) {
+      updateChart(presenceChart, presenceHistory);
+    }
+  });
+
+  $effect(() => {
+    if (motionHistory.length > 0) {
+      updateChart(motionChart, motionHistory);
+    }
+  });
+
+  $effect(() => {
+    if (objectTempHistory.length > 0) {
+      updateChart(objectTempChart, objectTempHistory);
+    }
+  });
+
+  $effect(() => {
+    if (ambientShockHistory.length > 0) {
+      updateChart(ambientShockChart, ambientShockHistory);
+    }
   });
 </script>
 
@@ -291,117 +359,48 @@
     <!-- Graphs -->
     <div class="mt-4 space-y-4">
       <!-- Presence Graph -->
-      {#snippet presenceGraph()}
-        {@const { min, max } = getMinMax(presenceHistory, 0, 500)}
-        {@const range = max - min}
-        <div class="p-3 bg-gray-50 rounded-lg border border-gray-200">
-          <div class="flex items-center justify-between mb-2">
-            <div class="text-sm font-medium text-gray-700">Presence Value</div>
-            <div class="text-xs text-gray-500">{formatValue(measurement.presenceValue)}</div>
-          </div>
-          <div class="relative">
-            <svg viewBox="0 0 300 60" class="w-full h-16 bg-white rounded border border-gray-300">
-              <path
-                d={generatePath(presenceHistory, 300, 60, min, max)}
-                fill="none"
-                stroke="#10b981"
-                stroke-width="2"
-              />
-              <!-- Current value indicator -->
-              {#if presenceHistory.length > 0}
-                {@const lastX = 300}
-                {@const lastY = range === 0 ? 30 : 60 - ((measurement.presenceValue - min) / range) * 60}
-                <circle cx={lastX} cy={lastY} r="3" fill="#10b981" />
-              {/if}
-            </svg>
-          </div>
+      <div class="px-2 py-3 bg-gray-50 rounded-lg border border-gray-200">
+        <div class="flex items-center justify-between mb-2 px-1">
+          <div class="text-sm font-medium text-gray-700">Presence Value</div>
+          <div class="text-xs text-gray-500">{formatValue(measurement.presenceValue)}</div>
         </div>
-      {/snippet}
-      {@render presenceGraph()}
+        <div class="h-16">
+          <canvas bind:this={presenceCanvas}></canvas>
+        </div>
+      </div>
 
       <!-- Motion Graph -->
-      {#snippet motionGraph()}
-        {@const { min, max } = getMinMax(motionHistory, 0, 500)}
-        {@const range = max - min}
-        <div class="p-3 bg-gray-50 rounded-lg border border-gray-200">
-          <div class="flex items-center justify-between mb-2">
-            <div class="text-sm font-medium text-gray-700">Motion Value</div>
-            <div class="text-xs text-gray-500">{formatValue(measurement.motionValue)}</div>
-          </div>
-          <div class="relative">
-            <svg viewBox="0 0 300 60" class="w-full h-16 bg-white rounded border border-gray-300">
-              <path
-                d={generatePath(motionHistory, 300, 60, min, max)}
-                fill="none"
-                stroke="#eab308"
-                stroke-width="2"
-              />
-              {#if motionHistory.length > 0}
-                {@const lastX = 300}
-                {@const lastY = range === 0 ? 30 : 60 - ((measurement.motionValue - min) / range) * 60}
-                <circle cx={lastX} cy={lastY} r="3" fill="#eab308" />
-              {/if}
-            </svg>
-          </div>
+      <div class="px-2 py-3 bg-gray-50 rounded-lg border border-gray-200">
+        <div class="flex items-center justify-between mb-2 px-1">
+          <div class="text-sm font-medium text-gray-700">Motion Value</div>
+          <div class="text-xs text-gray-500">{formatValue(measurement.motionValue)}</div>
         </div>
-      {/snippet}
-      {@render motionGraph()}
+        <div class="h-16">
+          <canvas bind:this={motionCanvas}></canvas>
+        </div>
+      </div>
 
       <!-- Object Temperature Graph -->
-      {#snippet objectTempGraph()}
-        {@const { min, max } = getMinMax(objectTempHistory, 15, 35)}
-        {@const range = max - min}
-        <div class="p-3 bg-gray-50 rounded-lg border border-gray-200">
-          <div class="flex items-center justify-between mb-2">
-            <div class="text-sm font-medium text-gray-700">Object Temperature</div>
-            <div class="text-xs text-gray-500">{formatTemperature(measurement.objectTemperatureCelsius)}°C</div>
-          </div>
-          <div class="relative">
-            <svg viewBox="0 0 300 60" class="w-full h-16 bg-white rounded border border-gray-300">
-              <path
-                d={generatePath(objectTempHistory, 300, 60, min, max)}
-                fill="none"
-                stroke="#ef4444"
-                stroke-width="2"
-              />
-              {#if objectTempHistory.length > 0}
-                {@const lastX = 300}
-                {@const lastY = range === 0 ? 30 : 60 - ((measurement.objectTemperatureCelsius - min) / range) * 60}
-                <circle cx={lastX} cy={lastY} r="3" fill="#ef4444" />
-              {/if}
-            </svg>
-          </div>
+      <div class="px-2 py-3 bg-gray-50 rounded-lg border border-gray-200">
+        <div class="flex items-center justify-between mb-2 px-1">
+          <div class="text-sm font-medium text-gray-700">Object Temperature</div>
+          <div class="text-xs text-gray-500">{formatTemperature(measurement.objectTemperatureCelsius)}°C</div>
         </div>
-      {/snippet}
-      {@render objectTempGraph()}
+        <div class="h-16">
+          <canvas bind:this={objectTempCanvas}></canvas>
+        </div>
+      </div>
 
       <!-- Ambient Shock Graph -->
-      {#snippet ambientShockGraph()}
-        {@const { min, max } = getMinMax(ambientShockHistory, 0, 500)}
-        {@const range = max - min}
-        <div class="p-3 bg-gray-50 rounded-lg border border-gray-200">
-          <div class="flex items-center justify-between mb-2">
-            <div class="text-sm font-medium text-gray-700">Ambient Shock Value</div>
-            <div class="text-xs text-gray-500">{formatValue(measurement.ambientShockValue)}</div>
-          </div>
-          <div class="relative">
-            <svg viewBox="0 0 300 60" class="w-full h-16 bg-white rounded border border-gray-300">
-              <path
-                d={generatePath(ambientShockHistory, 300, 60, min, max)}
-                fill="none"
-                stroke="#f97316"
-                stroke-width="2"
-              />
-              {#if ambientShockHistory.length > 0}
-                {@const lastX = 300}
-                {@const lastY = range === 0 ? 30 : 60 - ((measurement.ambientShockValue - min) / range) * 60}
-                <circle cx={lastX} cy={lastY} r="3" fill="#f97316" />
-              {/if}
-            </svg>
-          </div>
+      <div class="px-2 py-3 bg-gray-50 rounded-lg border border-gray-200">
+        <div class="flex items-center justify-between mb-2 px-1">
+          <div class="text-sm font-medium text-gray-700">Ambient Shock Value</div>
+          <div class="text-xs text-gray-500">{formatValue(measurement.ambientShockValue)}</div>
         </div>
-      {/snippet}
-      {@render ambientShockGraph()}
+        <div class="h-16">
+          <canvas bind:this={ambientShockCanvas}></canvas>
+        </div>
+      </div>
     </div>
   {:else if !error}
     <!-- No Data State -->
