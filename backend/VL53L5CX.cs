@@ -17,10 +17,10 @@ public class VL53L5CX : II2CDistanceSensor
     private const ushort REG_UI_CMD_STATUS = 0x2C00;
     private const ushort REG_UI_CMD_START = 0x2C04;
     private const ushort REG_UI_CMD_END = 0x2FFF;
-    
+
     // Device identification
     private const byte DEVICE_ID = 0xF0;
-    
+
     // Resolution modes
     public enum Resolution : byte
     {
@@ -40,14 +40,6 @@ public class VL53L5CX : II2CDistanceSensor
     {
         Sleep = 0x00,
         Wakeup = 0x01
-    }
-
-    // Firmware states
-    private enum FirmwareState
-    {
-        NotLoaded,  // Firmware not in RAM (needs full download)
-        Crashed,    // Firmware in RAM but crashed (needs MCU reset only)
-        Ready       // Firmware running and ready
     }
 
     // Default configuration values
@@ -82,7 +74,7 @@ public class VL53L5CX : II2CDistanceSensor
     private readonly byte[] _offsetData = new byte[VL53L5CX_OFFSET_BUFFER_SIZE];
     private readonly byte[] _xtalkData = new byte[VL53L5CX_XTALK_BUFFER_SIZE];
     private readonly byte[] _tempBuffer = new byte[VL53L5CX_TEMP_BUFFER_SIZE];
-    
+
     // Lock object for thread-safe initialization
     private static readonly Lock _initLock = new();
 
@@ -166,139 +158,113 @@ public class VL53L5CX : II2CDistanceSensor
                 CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX already initialized, skipping.");
                 return;
             }
-            
+
             base.Initialize(config, busId, token);
             Initialized = false;
 
             // Parse configuration
-            _currentResolution = config.TryGetValue("resolution", out string? resValue) && resValue == "8x8" 
-                ? Resolution.Res8x8 
+            _currentResolution = config.TryGetValue("resolution", out string? resValue) && resValue == "8x8"
+                ? Resolution.Res8x8
                 : Resolution.Res4x4;
 
-            _rangingFrequencyHz = config.TryGetValue("frequencyHz", out string? freqValue) 
-            ? byte.Parse(freqValue) 
+            _rangingFrequencyHz = config.TryGetValue("frequencyHz", out string? freqValue)
+            ? byte.Parse(freqValue)
             : DefaultRangingFrequencyHz;
 
-        uint integrationTimeMs = config.TryGetValue("integrationTimeMs", out string? intValue) 
-            ? uint.Parse(intValue) 
-            : DefaultIntegrationTimeMs;
+            uint integrationTimeMs = config.TryGetValue("integrationTimeMs", out string? intValue)
+                ? uint.Parse(intValue)
+                : DefaultIntegrationTimeMs;
 
-        _rangingMode = config.TryGetValue("rangingMode", out string? modeValue)
-            && modeValue.Equals("continuous", StringComparison.OrdinalIgnoreCase)
-            ? RangingMode.Continuous
-            : RangingMode.Autonomous;
+            _rangingMode = config.TryGetValue("rangingMode", out string? modeValue)
+                && modeValue.Equals("continuous", StringComparison.OrdinalIgnoreCase)
+                ? RangingMode.Continuous
+                : RangingMode.Autonomous;
 
-        // Validate frequency based on resolution
-        byte maxFreq = _currentResolution == Resolution.Res4x4 ? (byte)60 : (byte)15;
-        if (_rangingFrequencyHz > maxFreq)
-        {
-            CustomLogger.Log(this, CustomLogger.LogLevel.Warning, 
-                $"Frequency {_rangingFrequencyHz}Hz exceeds max {maxFreq}Hz for resolution {_currentResolution}. Clamping to {maxFreq}Hz.");
-            _rangingFrequencyHz = maxFreq;
-        }
-
-        // Update specifications with actual frequency
-        if (_currentResolution == Resolution.Res4x4)
-            _specifications4x4 = _specifications4x4 with { UpdateRateHz = _rangingFrequencyHz };
-        else
-            _specifications8x8 = _specifications8x8 with { UpdateRateHz = _rangingFrequencyHz };
-
-        // Check if firmware is already loaded BEFORE any reset (reset would erase it from RAM)
-        // This is useful when re-initializing without power cycling the sensor
-        FirmwareState firmwareState = CheckFirmwareState(token);
-        
-        if (firmwareState == FirmwareState.Ready)
-        {
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-                "VL53L5CX firmware already loaded and running, skipping reset and download.");
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-                "Proceeding directly to DCI configuration (offset, xtalk, default config).");
-            // Firmware is already running - proceed directly to DCI configuration
-            // Do NOT call EnableFirmwareAccess or reset, as it would disrupt the running firmware
-        }
-        else if (firmwareState == FirmwareState.Crashed)
-        {
-            // Firmware in RAM but crashed - reset MCU to restart it
-            CustomLogger.Log(this, CustomLogger.LogLevel.Warning, 
-                "VL53L5CX firmware crashed, performing MCU reset (fast recovery ~1s).");
-            
-            ResetMCU(token);
-            
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-                "MCU reset successful, firmware restarted. Proceeding to DCI configuration.");
-        }
-        else // FirmwareState.NotLoaded
-        {
-            // Firmware not loaded - perform full initialization sequence (as per ST's C++ implementation)
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-                "VL53L5CX firmware not loaded, performing full initialization sequence.");
-            
-            // 1. Software reset and boot sequence (ST lines 214-240)
-            SoftwareReset(token);
-
-            // 2. Wait for sensor to boot (ST lines 242-243)
-            WaitForBoot(token);
-
-            // 3. Enable FW access BEFORE firmware download (ST lines 244-258)
-            EnableFirmwareAccess(token);
-
-            // 4. Power ON status configuration (ST lines 261-281)
-            ApplyPowerOnStatus(token);
-
-            // 5. Download firmware to sensor (ST lines 281-302)
-            if (!DownloadFirmware(token))
+            // Validate frequency based on resolution
+            byte maxFreq = _currentResolution == Resolution.Res4x4 ? (byte)60 : (byte)15;
+            if (_rangingFrequencyHz > maxFreq)
             {
-                throw new InvalidOperationException("Failed to download firmware to VL53L5CX");
+                CustomLogger.Log(this, CustomLogger.LogLevel.Warning,
+                    $"Frequency {_rangingFrequencyHz}Hz exceeds max {maxFreq}Hz for resolution {_currentResolution}. Clamping to {maxFreq}Hz.");
+                _rangingFrequencyHz = maxFreq;
             }
-            // Note: DownloadFirmware() includes MCU reset at the end (ST lines 302-313)
-        }
 
-        // After firmware is ready (either freshly downloaded or already loaded), DCI operations can proceed
-        ReadNvmOffsetData(token);
-        SendOffsetData(Resolution.Res4x4, token);
-        Array.Copy(VL53L5CXFirmware.VL53L5CX_DEFAULT_XTALK, _xtalkData, _xtalkData.Length);
-        SendXtalkData(Resolution.Res4x4, token);
-        WriteDefaultConfiguration(token);
-        
-        // Apply pipe control and single range (ST's vl53l5cx_init lines 339-353)
-        // This configures NB_TARGET_PER_ZONE=1 and SINGLE_RANGE=1 (autonomous mode)
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Applying pipe control configuration...");
-        ApplyPipeControl(token);
+            // Update specifications with actual frequency
+            if (_currentResolution == Resolution.Res4x4)
+                _specifications4x4 = _specifications4x4 with { UpdateRateHz = _rangingFrequencyHz };
+            else
+                _specifications8x8 = _specifications8x8 with { UpdateRateHz = _rangingFrequencyHz };
 
-        // Note: Default configuration already sets resolution to 4x4
-        // Only call SetResolution if user wants a different resolution
-        if (_currentResolution != Resolution.Res4x4)
-        {
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-                $"VL53L5CX: Configuring non-default resolution {_currentResolution}");
-            SetResolution(_currentResolution, token);
-        }
-        else
-        {
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-                "VL53L5CX: Using default 4x4 resolution from firmware configuration");
-        }
-        
-        // ST's examples show these MUST be called after init and before start_ranging
-        // Even though init sets defaults, these functions properly activate the settings
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-            $"VL53L5CX: Configuring ranging parameters (mode={_rangingMode}, freq={_rangingFrequencyHz}Hz, integration={integrationTimeMs}ms)");
-        
-        SetRangingMode(_rangingMode, token);
-        SetRangingFrequency(_rangingFrequencyHz, token);
-        SetIntegrationTime(integrationTimeMs, token);
-        
-        // Mark as initialized
-        Initialized = true;
-        
-        // NOTE: ST's vl53l5cx_init() does NOT call vl53l5cx_start_ranging()
-        // User must call Start() manually after Initialize()
-        // This prevents EnsureWakeup/EnsureHostAccess from disturbing the freshly initialized MCU
-        
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-            $"VL53L5CX initialized successfully: resolution={_currentResolution}, frequency={_rangingFrequencyHz}Hz");
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-            "VL53L5CX: Call Start() to begin ranging");
+            // Check if firmware is already loaded BEFORE any reset (reset would erase it from RAM)
+            // This is useful when re-initializing without power cycling the sensor
+            if (!CheckFirmwareDownloaded(token))
+            {
+                // 1. Software reset and boot sequence (ST lines 214-240)
+                SoftwareReset(token);
+
+                // 2. Wait for sensor to boot (ST lines 242-243)
+                WaitForBoot(token);
+
+                // 3. Enable FW access BEFORE firmware download (ST lines 244-258)
+                EnableFirmwareAccess(token);
+
+                // 4. Power ON status configuration (ST lines 261-281)
+                ApplyPowerOnStatus(token);
+
+                // 5. Download firmware to sensor (ST lines 281-302)
+                if (!DownloadFirmware(token))
+                {
+                    throw new InvalidOperationException("Failed to download firmware to VL53L5CX");
+                }
+                // Note: DownloadFirmware() includes MCU reset at the end (ST lines 302-313)
+            }
+
+            // After firmware is ready (either freshly downloaded or already loaded), DCI operations can proceed
+            ReadNvmOffsetData(token);
+            SendOffsetData(Resolution.Res4x4, token);
+            Array.Copy(VL53L5CXFirmware.VL53L5CX_DEFAULT_XTALK, _xtalkData, _xtalkData.Length);
+            SendXtalkData(Resolution.Res4x4, token);
+            WriteDefaultConfiguration(token);
+
+            // Apply pipe control and single range (ST's vl53l5cx_init lines 339-353)
+            // This configures NB_TARGET_PER_ZONE=1 and SINGLE_RANGE=1 (autonomous mode)
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Applying pipe control configuration...");
+            ApplyPipeControl(token);
+
+            // Note: Default configuration already sets resolution to 4x4
+            // Only call SetResolution if user wants a different resolution
+            if (_currentResolution != Resolution.Res4x4)
+            {
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+                    $"VL53L5CX: Configuring non-default resolution {_currentResolution}");
+                SetResolution(_currentResolution, token);
+            }
+            else
+            {
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+                    "VL53L5CX: Using default 4x4 resolution from firmware configuration");
+            }
+
+            // ST's examples show these MUST be called after init and before start_ranging
+            // Even though init sets defaults, these functions properly activate the settings
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+                $"VL53L5CX: Configuring ranging parameters (mode={_rangingMode}, freq={_rangingFrequencyHz}Hz, integration={integrationTimeMs}ms)");
+
+            SetRangingMode(_rangingMode, token);
+            SetRangingFrequency(_rangingFrequencyHz, token);
+            SetIntegrationTime(integrationTimeMs, token);
+
+            // Mark as initialized
+            Initialized = true;
+
+            // NOTE: ST's vl53l5cx_init() does NOT call vl53l5cx_start_ranging()
+            // User must call Start() manually after Initialize()
+            // This prevents EnsureWakeup/EnsureHostAccess from disturbing the freshly initialized MCU
+
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+                $"VL53L5CX initialized successfully: resolution={_currentResolution}, frequency={_rangingFrequencyHz}Hz");
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+                "VL53L5CX: Call Start() to begin ranging");
         }
     }
 
@@ -311,10 +277,10 @@ public class VL53L5CX : II2CDistanceSensor
         I2C.WriteReg16(0x000F, 0x40, token);
         I2C.WriteReg16(0x000A, 0x03, token);
         Thread.Sleep(1);
-        
+
         byte tmp = I2C.ReadReg16(0x7FFF, token);  // Read bank register (ST line 222)
         I2C.WriteReg16(0x000C, 0x01, token);
-        
+
         // Config registers (ST lines 224-231)
         I2C.WriteReg16(0x0101, 0x00, token);
         I2C.WriteReg16(0x0102, 0x00, token);
@@ -323,7 +289,7 @@ public class VL53L5CX : II2CDistanceSensor
         I2C.WriteReg16(0x4002, 0x00, token);
         I2C.WriteReg16(0x010A, 0x03, token);
         I2C.WriteReg16(0x0103, 0x01, token);
-        
+
         // Boot sequence (ST lines 232-240)
         I2C.WriteReg16(0x000C, 0x00, token);
         I2C.WriteReg16(0x000F, 0x43, token);
@@ -343,22 +309,22 @@ public class VL53L5CX : II2CDistanceSensor
     private void EnableFirmwareAccess(CancellationToken token = default)
     {
         // Enable FW access BEFORE firmware download (ST lines 244-258)
-        CustomLogger.Log(this,  CustomLogger.LogLevel.Info, "Enabling FW access before firmware download...");
-        
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Enabling FW access before firmware download...");
+
         I2C.WriteReg16(0x000E, 0x01, token);
         SetBank(0x02, token);
-        
+
         // Enable FW access command
         I2C.WriteReg16(0x0003, 0x0D, token);
         SetBank(0x01, token);
-        
+
         // Poll for firmware ready (0x21 bit 0x10 == 0x10)
         PollForAnswer(1, 0, 0x0021, 0x10, 0x10, InitTimeoutMs, 10, token);
         SetBank(0x00, token);
-        
+
         // Enable host access to GO1
         I2C.WriteReg16(0x000C, 0x01, token);
-        
+
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "FW access enabled successfully");
     }
 
@@ -390,63 +356,42 @@ public class VL53L5CX : II2CDistanceSensor
     }
 
     /// <summary>
-    /// Check the current firmware state by reading status registers.
-    /// Returns: Ready (firmware running), Crashed (in RAM but crashed), NotLoaded (needs download).
+    /// Check if the firmware is already downloaded and running.
+    /// Returns: true if firmware is running, false otherwise.
     /// </summary>
-    private FirmwareState CheckFirmwareState(CancellationToken token = default)
+    private bool CheckFirmwareDownloaded(CancellationToken token = default)
     {
         try
         {
-            // Check if firmware is already running by reading firmware state registers
-            // This check is useful when re-initializing without power cycling the sensor
-            // Note: After power cycle, firmware is lost (stored in RAM, not flash)
-            
-            // Register 0x06 in bank 0x00: MCU boot status (bit 0 = boot complete)
-            // Register 0x21 in bank 0x01: Firmware status (0x10 = ready, 0x04 = crashed, 0x00 = not loaded)
-            
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Checking firmware state...");
-            
+            // Register 0x06 in bank 0x00: MCU boot status
+            // Bit 0: 1 = WAKED_UP (booted), 0 = SLEEP
+            // Bit 4-5: 0 = no firmware, 0b11 = firmware running (mask = 0x30)
+
             SetBank(0x00, token);
             byte bootStatus = I2C.ReadReg16(0x0006, token);
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"Boot status (0x06): 0x{bootStatus:X2}");
-            
+
             if ((bootStatus & 0x01) != 0x01)
             {
                 CustomLogger.Log(this, CustomLogger.LogLevel.Info, "MCU not booted yet, firmware not loaded");
-                return FirmwareState.NotLoaded;
+                return false;
             }
-            
-            SetBank(0x01, token);
-            byte fwStatus = I2C.ReadReg16(0x0021, token);
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"Firmware status (0x21): 0x{fwStatus:X2}");
-            SetBank(0x00, token);
-            
-            // Determine state based on firmware status register
-            // 0x10 = ready, 0x04 = crashed, 0x00 = not loaded
-            if ((fwStatus & 0x10) == 0x10)
+            // If booted, check if firmware is running  
+            if ((bootStatus & 0x30) == 0x30)
             {
-                CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info,
                     "✓ Firmware READY - will skip download");
-                return FirmwareState.Ready;
+                return true;
             }
-            else if (fwStatus == 0x04)
-            {
-                CustomLogger.Log(this, CustomLogger.LogLevel.Warning, 
-                    "✗ Firmware CRASHED - will reset MCU only (~1s)");
-                return FirmwareState.Crashed;
-            }
-            else
-            {
-                CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-                    $"✗ Firmware NOT LOADED (status=0x{fwStatus:X2}) - will download (~10s)");
-                return FirmwareState.NotLoaded;
-            }
+
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+                    $"✗ Unknown Firmware status (status=0x{bootStatus:X2}) - will download (~10s)");
+            return false;
         }
         catch (Exception ex)
         {
-            CustomLogger.Log(this, CustomLogger.LogLevel.Warning, 
+            CustomLogger.Log(this, CustomLogger.LogLevel.Warning,
                 $"Failed to check firmware status: {ex.Message} - will assume firmware not loaded.");
-            return FirmwareState.NotLoaded;
+            return false;
         }
     }
 
@@ -457,7 +402,7 @@ public class VL53L5CX : II2CDistanceSensor
     private void ResetMCU(CancellationToken token = default)
     {
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Resetting MCU to restart firmware in RAM...");
-        
+
         // MCU reset sequence (same as end of DownloadFirmware)
         SetBank(0x00, token);
         I2C.WriteReg16(0x0114, 0x00, token);
@@ -467,41 +412,41 @@ public class VL53L5CX : II2CDistanceSensor
         I2C.WriteReg16(0x000B, 0x00, token);
         I2C.WriteReg16(0x000C, 0x00, token);
         I2C.WriteReg16(0x000B, 0x01, token);
-        
+
         // Wait a bit for MCU to reset
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Waiting for MCU to reset...");
         Thread.Sleep(100);
-        
+
         // Verify firmware is back to ready state (0x10)
         // Note: After crash, polling for 0x06==0x00 doesn't work reliably,
         // so we just wait and verify firmware status instead
         SetBank(0x01, token);
-        
+
         int startTime = Environment.TickCount;
         bool fwReady = false;
         while (Environment.TickCount - startTime < InitTimeoutMs)
         {
             token.ThrowIfCancellationRequested();
             byte fwStatus = I2C.ReadReg16(0x0021, token);
-            
+
             if ((fwStatus & 0x10) == 0x10)
             {
-                CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info,
                     $"Firmware ready after reset (status=0x{fwStatus:X2})");
                 fwReady = true;
                 break;
             }
-            
+
             Thread.Sleep(50);
         }
-        
+
         SetBank(0x00, token);
-        
+
         if (!fwReady)
         {
             throw new TimeoutException("VL53L5CX: Firmware did not become ready after MCU reset");
         }
-        
+
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "MCU reset complete, firmware restarted successfully");
     }
 
@@ -596,10 +541,10 @@ public class VL53L5CX : II2CDistanceSensor
     {
         // Stop ranging command
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Stopping ranging");
-        
+
         SetBank(0x00, token);
         I2C.WriteReg16(0x0009, 0x04, token);
-        
+
         // Poll for command completion
         SetBank(0x00, token);
         int startTime = Environment.TickCount;
@@ -610,7 +555,7 @@ public class VL53L5CX : II2CDistanceSensor
                 break;
             Thread.Sleep(10);
         }
-        
+
         SetBank(0x00, token);
         _isRanging = false;
     }
@@ -791,7 +736,7 @@ public class VL53L5CX : II2CDistanceSensor
 
         // Write entire configuration buffer at once (as per ST's implementation)
         // ST writes the full config to 0x2c34 in one transaction, not in segments
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
             $"WriteDefaultConfiguration: Writing {VL53L5CXFirmware.VL53L5CX_DEFAULT_CONFIGURATION.Length} bytes to 0x2C34");
         I2C.WriteRegs16(0x2C34, VL53L5CXFirmware.VL53L5CX_DEFAULT_CONFIGURATION, token);
 
@@ -846,11 +791,6 @@ public class VL53L5CX : II2CDistanceSensor
         }
     }
 
-    private void PollForAnswer(byte size, byte pos, ushort address, byte mask, byte expectedValue, CancellationToken token = default)
-    {
-        PollForAnswer(size, pos, address, mask, expectedValue, 2000, 10, token);
-    }
-
     private void DciReadData(byte[] data, ushort index, ushort dataSize, CancellationToken token = default)
     {
         if (dataSize + 12 > VL53L5CX_TEMP_BUFFER_SIZE)
@@ -883,7 +823,7 @@ public class VL53L5CX : II2CDistanceSensor
     // Streamcount for data ready checking
     private byte _streamcount = 255;
     private uint _dataReadSize = 0;
-    
+
     // Block header IDX constants (for 1 target per zone)
     private const ushort VL53L5CX_DISTANCE_IDX = 0xD33C;
     private const ushort VL53L5CX_TARGET_STATUS_IDX = 0xD47C;
@@ -926,7 +866,7 @@ public class VL53L5CX : II2CDistanceSensor
             // CRITICAL: Ensure bank 0x02 is active for DCI operations
             // ST's vl53l5cx_start_ranging() expects bank 0x02 (set during init and never changed)
             SetBank(0x02, token);
-            
+
             // NOTE: Do NOT call EnsureWakeup/EnsureHostAccess here!
             // ST's vl53l5cx_start_ranging() does not do this - sensor is already awake after init
             // Calling them here perturbs DCI operations and causes timeouts
@@ -1005,7 +945,7 @@ public class VL53L5CX : II2CDistanceSensor
             DciWriteData(UIntArrayToBytes(output), VL53L5CX_DCI_OUTPUT_LIST, token);
             DciWriteData(UIntArrayToBytes(headerConfig), VL53L5CX_DCI_OUTPUT_CONFIG, token);
             DciWriteData(UIntArrayToBytes(output_bh_enable), VL53L5CX_DCI_OUTPUT_ENABLES, token);
-            
+
             // Start xshut bypass - ST's exact sequence (NO status verification in between!)
             SetBank(0x00, token);
             I2C.WriteReg16(0x0009, 0x05, token);
@@ -1080,7 +1020,7 @@ public class VL53L5CX : II2CDistanceSensor
         // && (temp_buffer[1] == 0x5)
         // && ((temp_buffer[2] & 0x5) == 0x5)
         // && ((temp_buffer[3] & 0x10) == 0x10)
-        
+
         bool ready = (statusBytes[0] != _streamcount)
             && (statusBytes[0] != 255)
             && (statusBytes[1] == 0x05)
@@ -1139,13 +1079,13 @@ public class VL53L5CX : II2CDistanceSensor
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: ReadOnce - data ready, reading buffer...");
             SetBank(0x02, token);
             buffer = I2C.ReadRegs16(0x0000, dataSize, token);
-            
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
                 $"VL53L5CX: ReadOnce - buffer read BEFORE swap, bytes 12-19: [{string.Join(", ", buffer.Skip(12).Take(8).Select(b => $"0x{b:X2}"))}]");
-            
+
             SwapBuffer(buffer, dataSize);
-            
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
                 $"VL53L5CX: ReadOnce - buffer AFTER swap, bytes 12-19: [{string.Join(", ", buffer.Skip(12).Take(8).Select(b => $"0x{b:X2}"))}]");
 
             if (!IsAllZero(buffer))
@@ -1166,7 +1106,7 @@ public class VL53L5CX : II2CDistanceSensor
 
         // ST's data format: first 4 bytes are status, then START_BH at offset 12
         int i = 12; // Start at offset 12 where START_BH should be
-        
+
         // Verify and skip START_BH (0x0000000D)
         // After SwapBuffer, data is in little-endian, BitConverter.ToUInt32 reads correctly
         uint startBh = BitConverter.ToUInt32(buffer, i);
@@ -1177,12 +1117,12 @@ public class VL53L5CX : II2CDistanceSensor
         }
         else
         {
-            CustomLogger.Log(this, CustomLogger.LogLevel.Warning, 
+            CustomLogger.Log(this, CustomLogger.LogLevel.Warning,
                 $"VL53L5CX: Expected START_BH (0x{VL53L5CX_START_BH:X8}) at offset {i}, got 0x{startBh:X8}");
         }
-        
+
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Parsing data blocks, numZones={numZones}, starting at offset {i}");
-        
+
         int blockCount = 0;
         while (i < dataSize - 4)
         {
@@ -1194,7 +1134,7 @@ public class VL53L5CX : II2CDistanceSensor
             uint size = (blockHeader >> 4) & 0xFFF;
             uint idx = (blockHeader >> 16) & 0xFFFF;
 
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
                 $"VL53L5CX: Block {blockCount} @ offset {i}: header=0x{blockHeader:X8}, type={type}, size={size}, idx=0x{idx:X4}");
 
             // Type 0x0D is START_BH or higher = end marker
@@ -1206,7 +1146,7 @@ public class VL53L5CX : II2CDistanceSensor
 
             // Calculate block data size (ST's formula)
             int msize = (type >= 1 && type < 0x0D) ? (int)(type * size) : (int)size;
-            
+
             // Type 0x0 = metadata/header (skip)
             if (type == 0)
             {
@@ -1219,15 +1159,15 @@ public class VL53L5CX : II2CDistanceSensor
             {
                 CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Found DISTANCE block, reading {numZones} distances...");
                 int dataOffset = i + 4;
-                
+
                 // Log first 16 bytes of distance data to check if data is actually present
-                CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info,
                     $"VL53L5CX: Distance block raw bytes (first 16): [{string.Join(", ", buffer.Skip(dataOffset).Take(16).Select(b => $"0x{b:X2}"))}]");
-                
+
                 for (int z = 0; z < numZones && dataOffset + 1 < dataSize; z++)
                 {
                     distances[z] = BitConverter.ToInt16(buffer, dataOffset);
-                    CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"  Zone {z}: raw={distances[z]} (bytes: 0x{buffer[dataOffset]:X2} 0x{buffer[dataOffset+1]:X2})");
+                    CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"  Zone {z}: raw={distances[z]} (bytes: 0x{buffer[dataOffset]:X2} 0x{buffer[dataOffset + 1]:X2})");
                     dataOffset += 2;
                 }
             }
@@ -1246,7 +1186,7 @@ public class VL53L5CX : II2CDistanceSensor
             i += msize + 4;
             blockCount++;
         }
-        
+
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Parsed {blockCount} blocks");
 
         for (int z = 0; z < numZones; z++)
@@ -1290,21 +1230,21 @@ public class VL53L5CX : II2CDistanceSensor
         Array.Copy(footer, 0, _tempBuffer, 4 + payload.Length, footer.Length);
 
         ushort address = (ushort)(REG_UI_CMD_END - (dataSize + 12) + 1);
-        
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
             $"DciWriteData: index=0x{index:X4}, dataSize={dataSize}, address=0x{address:X4}");
-        
+
         // CRITICAL FIX: DCI operations work in bank 0x02 (NOT bank 0x00)
         // ST's vl53l5cx_dci_write_data() does NOT change bank - uses current bank (0x02)
         // Bank 0x02 must be active before calling DciWriteData (set by caller)
         // DO NOT call SetBank here - it causes DCI operations to fail!
         I2C.WriteRegs16(address, _tempBuffer.AsSpan(0, dataSize + 12).ToArray(), token);
-        
+
         // Poll in current bank (bank 0x02) - ST's code does NOT change bank
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
             "DciWriteData: Polling for command completion...");
         PollForAnswer(4, 1, REG_UI_CMD_STATUS, 0xFF, 0x03, 2000, 10, token);
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
             "DciWriteData: Command completed successfully");
     }
 
@@ -1326,7 +1266,7 @@ public class VL53L5CX : II2CDistanceSensor
         // Check if firmware is available
         if (!VL53L5CXFirmware.IsFirmwareAvailable())
         {
-            CustomLogger.Log(this, CustomLogger.LogLevel.Error, 
+            CustomLogger.Log(this, CustomLogger.LogLevel.Error,
                 "ERROR: Firmware data not loaded. Please populate VL53L5CXFirmware.cs with data from vl53l5cx_buffers.h");
             return false;
         }
@@ -1338,7 +1278,7 @@ public class VL53L5CX : II2CDistanceSensor
             // Set memory bank for firmware download
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Setting memory bank to 0x09 for firmware chunk 1");
             SetBank(0x09, token);
-            
+
             // Download firmware in 3 chunks as done by ST's driver
             // Chunk 1: 0x8000 bytes at address 0x0000
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Downloading firmware chunk 1/3 (32KB)...");
@@ -1353,9 +1293,9 @@ public class VL53L5CX : II2CDistanceSensor
                 I2C.WriteRegs16((ushort)offset, segment, token);
             }
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Firmware chunk 1 downloaded successfully");
-            
+
             token.ThrowIfCancellationRequested();
-            
+
             // Chunk 2: 0x8000 bytes at address 0x8000
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Setting memory bank to 0x0A for firmware chunk 2");
             SetBank(0x0A, token);
@@ -1371,9 +1311,9 @@ public class VL53L5CX : II2CDistanceSensor
                 I2C.WriteRegs16((ushort)offset, segment, token);
             }
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Firmware chunk 2 downloaded successfully");
-            
+
             token.ThrowIfCancellationRequested();
-            
+
             // Chunk 3: 0x5000 bytes at address 0x10000
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Setting memory bank to 0x0B for firmware chunk 3");
             SetBank(0x0B, token);
@@ -1389,10 +1329,10 @@ public class VL53L5CX : II2CDistanceSensor
                 I2C.WriteRegs16((ushort)offset, segment, token);
             }
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Firmware chunk 3 downloaded successfully");
-            
+
             // Switch to bank 0x01 after firmware download (as per ST line 295)
             SetBank(0x01, token);
-            
+
             // Check if firmware correctly downloaded (as per ST's implementation lines 297-302)
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Verifying firmware download...");
             SetBank(0x02, token);
@@ -1400,18 +1340,18 @@ public class VL53L5CX : II2CDistanceSensor
             I2C.WriteReg16(0x0003, 0x0D, token);  // Verification command
             SetBank(0x01, token);
             Thread.Sleep(5);  // Small delay after bank switch
-            
+
             // Poll for firmware ready bit (0x21 bit 0x10 == 0x10)
             // Note: This checks if firmware was correctly loaded into RAM
             PollForAnswer(1, 0, 0x0021, 0x10, 0x10, InitTimeoutMs, 10, token);
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Firmware verification successful - firmware loaded correctly");
-            
+
             // Switch to bank 0x00 after verification (as per ST line 302)
             SetBank(0x00, token);
-            
+
             // Enable host access to GO1
             I2C.WriteReg16(0x000C, 0x01, token);  // Host access command
-            
+
             // Reset MCU to start the firmware
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Resetting MCU to start firmware...");
             I2C.WriteReg16(0x0114, 0x00, token);
@@ -1421,7 +1361,7 @@ public class VL53L5CX : II2CDistanceSensor
             I2C.WriteReg16(0x000B, 0x00, token);
             I2C.WriteReg16(0x000C, 0x00, token);
             I2C.WriteReg16(0x000B, 0x01, token);
-            
+
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Waiting for MCU reset (register 0x06 should become 0x00)");
             // Wait for MCU to enter reset state (register 0x06 should become 0x00)
             // Note: Bank 0x00 already active, do NOT change bank in loop
@@ -1435,20 +1375,20 @@ public class VL53L5CX : II2CDistanceSensor
                     // Note: Do NOT change bank - already in bank 0x00
                     byte bootStatus = I2C.ReadReg16(0x0006, token);
                     iterations++;
-                    
+
                     if (iterations <= 5 || iterations % 50 == 0)
                     {
-                        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
                             $"MCU reset check #{iterations}: 0x06=0x{bootStatus:X2}");
                     }
-                    
+
                     if (bootStatus == 0x00)
                     {
-                        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
                             $"MCU entered reset state after {iterations} iterations");
                         break;
                     }
-                    
+
                     Thread.Sleep(10);
                 }
             }
@@ -1458,7 +1398,7 @@ public class VL53L5CX : II2CDistanceSensor
                     $"ERROR: MCU reset timeout ({ex.Message})");
                 return false;
             }
-            
+
             // Switch to bank 0x02 (as per ST's C++ implementation)
             // Firmware is now ready for DCI operations
             SetBank(0x02, token);
