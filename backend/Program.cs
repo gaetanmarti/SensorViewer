@@ -180,23 +180,6 @@ public class Program
             DisplayHelp();
             return;
         }
-
-        /* TESTS
-        var tof = new TMF882X();
-        if (tof.TryDetect(1))
-            Console.WriteLine("TMF882X detected.");
-        else
-            Console.WriteLine("TMF882X not detected.");
-        tof.Initialize([], 1);
-        for (int i = 0; i < 10; i++)
-        {
-            var tuple = tof.ReadOnce();
-            foreach (var (dist, conf) in tuple)
-                Console.WriteLine($"Distance = {dist} mm, Confidence = {conf}");
-            Console.WriteLine("---");
-            Thread.Sleep(10);
-        }
-        */
         
         // Parse port number
 

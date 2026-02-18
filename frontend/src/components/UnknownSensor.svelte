@@ -15,7 +15,7 @@
   let { device } = $props();
 </script>
 
-<div class="bg-white rounded-lg shadow p-4 border-l-4 border-gray-400">
+<div class="w-full h-full bg-white rounded-lg shadow p-4 border-l-4 border-gray-400">
   <div class="flex items-start justify-between">
     <div class="flex-1">
       <h3 class="text-lg font-semibold text-gray-800 mb-1">{device.name}</h3>

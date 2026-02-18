@@ -19,7 +19,7 @@ export const POLLING_INTERVALS = {
   PC_SENSORS: 5000,
   
   // I2C distance sensors polling interval (300ms)
-  I2C_DISTANCE_SENSORS: 250,
+  I2C_DISTANCE_SENSORS: 100,
   
   // I2C thermal sensors polling interval (1000ms = every 1 second)
   I2C_THERMAL_SENSORS: 250,

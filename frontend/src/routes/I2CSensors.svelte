@@ -122,22 +122,24 @@
     </div>
   {:else}
     <!-- Device List -->
-    <div class="space-y-4">
-      <div class="text-sm text-gray-600 mb-2">
+    <div>
+      <div class="text-sm text-gray-600 mb-4">
         Found {devices.length} device{devices.length !== 1 ? 's' : ''}
       </div>
       
-      {#each devices as device (device.address)}
-        {#if getComponentForDevice(device.type) === DistanceSensor}
-          <DistanceSensor {device} />
-        {:else if getComponentForDevice(device.type) === ThermalSensor}
-          <ThermalSensor {device} />
-        {:else if getComponentForDevice(device.type) === HumanPresenceSensor}
-          <HumanPresenceSensor {device} />
-        {:else}
-          <UnknownSensor {device} />
-        {/if}
-      {/each}
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {#each devices as device (device.address)}
+          {#if getComponentForDevice(device.type) === DistanceSensor}
+            <DistanceSensor {device} />
+          {:else if getComponentForDevice(device.type) === ThermalSensor}
+            <ThermalSensor {device} />
+          {:else if getComponentForDevice(device.type) === HumanPresenceSensor}
+            <HumanPresenceSensor {device} />
+          {:else}
+            <UnknownSensor {device} />
+          {/if}
+        {/each}
+      </div>
     </div>
   {/if}
 </div>

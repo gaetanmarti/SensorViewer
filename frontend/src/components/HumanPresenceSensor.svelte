@@ -275,7 +275,7 @@
   });
 </script>
 
-<div class="bg-white rounded-lg shadow p-4 border-l-4 border-purple-500">
+<div class="w-full h-full bg-white rounded-lg shadow p-4 border-l-4 border-green-500 flex flex-col">
   <!-- Header -->
   <div class="flex items-start justify-between mb-3">
     <div class="flex-1">

@@ -52,7 +52,7 @@ public class STHS34PF80 : II2CHumanPresenceSensor
     private const byte EMB_ALGO_CONFIG = 0x28;        // Algorithm config (bit 1: sel_abs, bit 2: comp_type, bit 3: int_pulsed)
 
     // Configuration
-    private float _updateRateHz = 4.0f;
+    private float _updateRateHz = 15.0f;
     private float _detectionRangeMeters = 4.0f;
     
     // Thresholds (in 0.01°C units) - Optimized for indoor human detection
