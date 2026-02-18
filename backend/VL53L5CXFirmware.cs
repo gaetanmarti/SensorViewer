@@ -1,3 +1,10 @@
+// ============================================================================
+// CONFIGURATION: VL53L5CX_FW_NBTAR_RANGING (1 or 2 targets per zone)
+// Change VL53L5CX_FW_NBTAR_RANGING constant below (line 18) to select mode
+// ============================================================================
+#define VL53L5CX_FW_NBTAR_1
+// ============================================================================
+
 namespace immensive;
 
 /// <summary>
@@ -21529,9 +21536,6 @@ public static class VL53L5CXFirmware
         0x00, 0x00, 0x00, 0x00
     ];
 
-    // Internal number of targets per zones (1 or 2)
-    public const byte VL53L5CX_FW_NBTAR_RANGING	= 1;
-
     /// <summary>
     /// VL53L5CX default configuration (972 bytes)
     /// This configuration is loaded after the firmware download
@@ -22025,4 +22029,70 @@ public static class VL53L5CXFirmware
     /// Gets the expected Xtalk size
     /// </summary>
     public const int ExpectedXtalkSize = 776;
+
+    // ============================================================================
+    // CONFIGURATION: Change this value to 1 or 2
+    // ============================================================================
+    /// <summary>
+    /// Number of targets per zone (compile-time constant)
+    /// Set to 1 for single target mode, or 2 for multiple targets mode
+    /// </summary>
+    public const byte VL53L5CX_FW_NBTAR_RANGING = 1;  // ← CHANGE THIS VALUE (1 or 2)
+    // ============================================================================
+
+    /// <summary>
+    /// Block header values for range results
+    /// Values are automatically selected based on VL53L5CX_FW_NBTAR_RANGING
+    /// </summary>
+    public enum BlockHeader : uint
+    {
+        VL53L5CX_START_BH = 0x0000000DU,
+        VL53L5CX_METADATA_BH = 0x54B400C0U,
+        VL53L5CX_COMMONDATA_BH = 0x54C00040U,
+        VL53L5CX_AMBIENT_RATE_BH = 0x54D00104U,
+        VL53L5CX_SPAD_COUNT_BH = 0x55D00404U,
+#if VL53L5CX_FW_NBTAR_1
+        VL53L5CX_NB_TARGET_DETECTED_BH = 0xCF7C0401U,
+        VL53L5CX_SIGNAL_RATE_BH = 0xCFBC0404U,
+        VL53L5CX_RANGE_SIGMA_MM_BH = 0xD2BC0402U,
+        VL53L5CX_DISTANCE_BH = 0xD33C0402U,
+        VL53L5CX_REFLECTANCE_BH = 0xD43C0401U,
+        VL53L5CX_TARGET_STATUS_BH = 0xD47C0401U,
+#else
+        VL53L5CX_NB_TARGET_DETECTED_BH = 0x57D00401U,
+        VL53L5CX_SIGNAL_RATE_BH = 0x58900404U,
+        VL53L5CX_RANGE_SIGMA_MM_BH = 0x64900402U,
+        VL53L5CX_DISTANCE_BH = 0x66900402U,
+        VL53L5CX_REFLECTANCE_BH = 0x6A900401U,
+        VL53L5CX_TARGET_STATUS_BH = 0x6B900401U,
+#endif
+        VL53L5CX_MOTION_DETECT_BH = 0xCC5008C0U
+    }
+
+    /// <summary>
+    /// Index values for range results
+    /// Values are automatically selected based on VL53L5CX_FW_NBTAR_RANGING
+    /// </summary>
+    public enum Index : ushort
+    {
+        VL53L5CX_METADATA_IDX = 0x54B4,
+        VL53L5CX_SPAD_COUNT_IDX = 0x55D0,
+        VL53L5CX_AMBIENT_RATE_IDX = 0x54D0,
+#if VL53L5CX_FW_NBTAR_1
+        VL53L5CX_NB_TARGET_DETECTED_IDX = 0xCF7C,
+        VL53L5CX_SIGNAL_RATE_IDX = 0xCFBC,
+        VL53L5CX_RANGE_SIGMA_MM_IDX = 0xD2BC,
+        VL53L5CX_DISTANCE_IDX = 0xD33C,
+        VL53L5CX_REFLECTANCE_EST_PC_IDX = 0xD43C,
+        VL53L5CX_TARGET_STATUS_IDX = 0xD47C,
+#else
+        VL53L5CX_NB_TARGET_DETECTED_IDX = 0x57D0,
+        VL53L5CX_SIGNAL_RATE_IDX = 0x5890,
+        VL53L5CX_RANGE_SIGMA_MM_IDX = 0x6490,
+        VL53L5CX_DISTANCE_IDX = 0x6690,
+        VL53L5CX_REFLECTANCE_EST_PC_IDX = 0x6A90,
+        VL53L5CX_TARGET_STATUS_IDX = 0x6B90,
+#endif
+        VL53L5CX_MOTION_DETEC_IDX = 0xCC50
+    }
 }
