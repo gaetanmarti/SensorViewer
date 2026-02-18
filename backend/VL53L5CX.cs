@@ -166,6 +166,9 @@ public class VL53L5CX : II2CDistanceSensor
             _currentResolution = config.TryGetValue("resolution", out string? resValue) && resValue == "8x8"
                 ? Resolution.Res8x8
                 : Resolution.Res4x4;
+            
+            if (_currentResolution == Resolution.Res8x8)
+                throw new NotSupportedException("VL53L5CX 8x8 resolution mode is not supported in this implementation. Only 4x4 mode is supported due to firmware configuration.");
 
             _rangingFrequencyHz = config.TryGetValue("frequencyHz", out string? freqValue)
             ? byte.Parse(freqValue)
@@ -247,8 +250,8 @@ public class VL53L5CX : II2CDistanceSensor
 
             // ST's examples show these MUST be called after init and before start_ranging
             // Even though init sets defaults, these functions properly activate the settings
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
-                $"VL53L5CX: Configuring ranging parameters (mode={_rangingMode}, freq={_rangingFrequencyHz}Hz, integration={integrationTimeMs}ms)");
+            //CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+            //    $"VL53L5CX: Configuring ranging parameters (mode={_rangingMode}, freq={_rangingFrequencyHz}Hz, integration={integrationTimeMs}ms)");
 
             SetRangingMode(_rangingMode, token);
             SetRangingFrequency(_rangingFrequencyHz, token);
@@ -261,10 +264,10 @@ public class VL53L5CX : II2CDistanceSensor
             // User must call Start() manually after Initialize()
             // This prevents EnsureWakeup/EnsureHostAccess from disturbing the freshly initialized MCU
 
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
-                $"VL53L5CX initialized successfully: resolution={_currentResolution}, frequency={_rangingFrequencyHz}Hz");
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
-                "VL53L5CX: Call Start() to begin ranging");
+            //CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+            //    $"VL53L5CX initialized successfully: resolution={_currentResolution}, frequency={_rangingFrequencyHz}Hz");
+            //CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+            //    "VL53L5CX: Call Start() to begin ranging");
         }
     }
 
@@ -657,12 +660,12 @@ public class VL53L5CX : II2CDistanceSensor
             Array.Clear(_tempBuffer, 0x78, 4);
         }
 
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"SendXtalkData: Writing {VL53L5CX_XTALK_BUFFER_SIZE} bytes to 0x2CF8 (resolution={resolution})");
+        //CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"SendXtalkData: Writing {VL53L5CX_XTALK_BUFFER_SIZE} bytes to 0x2CF8 (resolution={resolution})");
         I2C.WriteRegs16(0x2CF8, _tempBuffer.AsSpan(0, VL53L5CX_XTALK_BUFFER_SIZE).ToArray(), token);
         // Note: Bank 0x02 already active (reads in current bank)
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "SendXtalkData: Polling for command completion...");
+        //CustomLogger.Log(this, CustomLogger.LogLevel.Info, "SendXtalkData: Polling for command completion...");
         PollForAnswer(4, 1, REG_UI_CMD_STATUS, 0xFF, 0x03, 2000, 10, token);
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "SendXtalkData: Command completed successfully");
+        //CustomLogger.Log(this, CustomLogger.LogLevel.Info, "SendXtalkData: Command completed successfully");
     }
 
     private void WriteDefaultConfiguration(CancellationToken token = default)
@@ -672,14 +675,14 @@ public class VL53L5CX : II2CDistanceSensor
 
         // Write entire configuration buffer at once (as per ST's implementation)
         // ST writes the full config to 0x2c34 in one transaction, not in segments
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
-            $"WriteDefaultConfiguration: Writing {VL53L5CXFirmware.VL53L5CX_DEFAULT_CONFIGURATION.Length} bytes to 0x2C34");
+        //CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+        //    $"WriteDefaultConfiguration: Writing {VL53L5CXFirmware.VL53L5CX_DEFAULT_CONFIGURATION.Length} bytes to 0x2C34");
         I2C.WriteRegs16(0x2C34, VL53L5CXFirmware.VL53L5CX_DEFAULT_CONFIGURATION, token);
 
         // Note: Bank 0x02 already active (reads in current bank)
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "WriteDefaultConfiguration: Polling for command completion...");
+        //CustomLogger.Log(this, CustomLogger.LogLevel.Info, "WriteDefaultConfiguration: Polling for command completion...");
         PollForAnswer(4, 1, REG_UI_CMD_STATUS, 0xFF, 0x03, 2000, 10, token);
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "WriteDefaultConfiguration: Command completed successfully");
+        //CustomLogger.Log(this, CustomLogger.LogLevel.Info, "WriteDefaultConfiguration: Command completed successfully");
     }
 
     private void ApplyPipeControl(CancellationToken token = default)
@@ -777,7 +780,7 @@ public class VL53L5CX : II2CDistanceSensor
             return;
         }
 
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Starting ranging");
+        // CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Starting ranging");
 
         try
         {
@@ -857,8 +860,8 @@ public class VL53L5CX : II2CDistanceSensor
 
             uint[] headerConfig = [dataReadSize, outputListCount + 1];
 
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
-                $"VL53L5CX: Writing DCI outputs, dataReadSize={dataReadSize}, outputListCount={outputListCount}, output_bh_enable[0]=0x{output_bh_enable[0]:X8}");
+            //CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+            //    $"VL53L5CX: Writing DCI outputs, dataReadSize={dataReadSize}, outputListCount={outputListCount}, output_bh_enable[0]=0x{output_bh_enable[0]:X8}");
 
             DciWriteData(UIntArrayToBytes(output), VL53L5CX_DCI_OUTPUT_LIST, token);
             DciWriteData(UIntArrayToBytes(headerConfig), VL53L5CX_DCI_OUTPUT_CONFIG, token);
@@ -872,17 +875,17 @@ public class VL53L5CX : II2CDistanceSensor
             // Start ranging session (UI command region 0x2C00-0x2FFF is in bank 0x02)
             // NOTE: Stay in bank 0x02 - do NOT switch to bank 0x00 here!
             byte[] cmd = [0x00, 0x03, 0x00, 0x00];
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Writing ranging start command to 0x2FFC...");
+            // CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Writing ranging start command to 0x2FFC...");
             I2C.WriteRegs16(0x2FFC, cmd, token);
 
             // Poll for command accepted (in bank 0x02 where we already are)
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Polling for ranging command acceptance...");
+            // CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Polling for ranging command acceptance...");
             PollForAnswer(4, 1, 0x2C00, 0xFF, 0x03, CommandTimeoutMs, 10, token);
 
             _streamcount = 255;
             _isRanging = true;
 
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Ranging started successfully");
+            // CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Ranging started successfully");
         }
         catch (Exception ex)
         {
@@ -972,7 +975,7 @@ public class VL53L5CX : II2CDistanceSensor
         // Auto-start ranging if not already started (ST pattern: user calls start manually, but we auto-start for simplicity)
         if (!_isRanging)
         {
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Auto-starting ranging for ReadOnce()");
+            //CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Auto-starting ranging for ReadOnce()");
             Start(token);
         }
 
@@ -1022,13 +1025,13 @@ public class VL53L5CX : II2CDistanceSensor
             ushort idxValue = (ushort)((blockHeader >> 16) & 0xFFFF);
             VL53L5CXFirmware.Index idx = (VL53L5CXFirmware.Index)idxValue;
 
-            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
-                $"VL53L5CX: Block {blockCount} @ offset {i}: header=0x{blockHeader:X8}, type={type}, size={size}, idx={idx} (0x{idxValue:X4})");
+            //CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+            //    $"VL53L5CX: Block {blockCount} @ offset {i}: header=0x{blockHeader:X8}, type={type}, size={size}, idx={idx} (0x{idxValue:X4})");
 
             // Type 0x0D is START_BH or higher = end marker
             if (type >= 0x0D)
             {
-                CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: End marker (type=0x{type:X})");
+                // CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: End marker (type=0x{type:X})");
                 break;
             }
 
@@ -1054,7 +1057,7 @@ public class VL53L5CX : II2CDistanceSensor
             }
             else if (idx == VL53L5CXFirmware.Index.VL53L5CX_TARGET_STATUS_IDX)
             {
-                CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Found TARGET_STATUS block, reading {numZones} statuses...");
+                //CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Found TARGET_STATUS block, reading {numZones} statuses...");
                 int dataOffset = i + 4;
                 for (int z = 0; z < numZones && dataOffset < dataSize; z++)
                 {
@@ -1090,12 +1093,47 @@ public class VL53L5CX : II2CDistanceSensor
                     dataOffset += 1;
                 }
             }
+            /*
+            else if (idx == VL53L5CXFirmware.Index.VL53L5CX_NB_TARGET_DETECTED_IDX)
+            {
+                // Number of targets detected (64 bytes, 1 byte per zone)
+                // This value indicates the number of detected targets in each zone
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Found NB_TARGET_DETECTED block (size={size}, type={type})");
+                int dataOffset = i + 4;
+                for (int z = 0; z < numZones && dataOffset < dataSize; z++)
+                {
+                    byte nbTargets = buffer[dataOffset];
+                    CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"  Zone {z}: {nbTargets} target(s) detected");
+                    dataOffset += 1;
+                }
+            }
+            else if (idx == VL53L5CXFirmware.Index.VL53L5CX_MOTION_DETEC_IDX)
+            {
+                // Motion indicator (140 bytes)
+                // Structure containing motion indicator results
+                // The field 'motion' contains the motion intensity
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Found MOTION_DETECT block (size={size}, type={type}, total_bytes={msize})");
+                int dataOffset = i + 4;
+                
+                if (msize >= 140)
+                {
+                    // Motion indicator structure (based on ST's vl53l5cx_motion_indicator_t)
+                    // First 4 bytes contain global motion indicator
+                    uint globalMotion = BitConverter.ToUInt32(buffer, dataOffset);
+                    CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"  Global motion indicator: {globalMotion}");
+                    
+                    // Display first few bytes for debugging
+                    string motionHex = string.Join(" ", buffer.AsSpan(dataOffset, Math.Min(16, msize)).ToArray().Select(b => $"0x{b:X2}"));
+                    CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"  Motion data (first 16 bytes): {motionHex}");
+                }
+            }
+            */
 
             i += msize + 4;
             blockCount++;
         }
 
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Parsed {blockCount} blocks");
+        //CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"VL53L5CX: Parsed {blockCount} blocks");
 
         for (int z = 0; z < numZones; z++)
         {
@@ -1137,8 +1175,8 @@ public class VL53L5CX : II2CDistanceSensor
 
         ushort address = (ushort)(REG_UI_CMD_END - (dataSize + 12) + 1);
 
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
-            $"DciWriteData: index=0x{index:X4}, dataSize={dataSize}, address=0x{address:X4}");
+        //CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+        //    $"DciWriteData: index=0x{index:X4}, dataSize={dataSize}, address=0x{address:X4}");
 
         // CRITICAL FIX: DCI operations work in bank 0x02 (NOT bank 0x00)
         // ST's vl53l5cx_dci_write_data() does NOT change bank - uses current bank (0x02)
@@ -1147,11 +1185,11 @@ public class VL53L5CX : II2CDistanceSensor
         I2C.WriteRegs16(address, _tempBuffer.AsSpan(0, dataSize + 12).ToArray(), token);
 
         // Poll in current bank (bank 0x02) - ST's code does NOT change bank
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
-            "DciWriteData: Polling for command completion...");
+        //CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+        //    "DciWriteData: Polling for command completion...");
         PollForAnswer(4, 1, REG_UI_CMD_STATUS, 0xFF, 0x03, 2000, 10, token);
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
-            "DciWriteData: Command completed successfully");
+        //CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+        //    "DciWriteData: Command completed successfully");
     }
 
     private static byte[] UIntArrayToBytes(uint[] values)

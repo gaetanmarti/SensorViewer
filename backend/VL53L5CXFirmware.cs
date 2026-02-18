@@ -22035,9 +22035,15 @@ public static class VL53L5CXFirmware
     // ============================================================================
     /// <summary>
     /// Number of targets per zone (compile-time constant)
-    /// Set to 1 for single target mode, or 2 for multiple targets mode
+    /// Set to 1 for single target mode, up to 4 for multiple targets mode
     /// </summary>
-    public const byte VL53L5CX_FW_NBTAR_RANGING = 1;  // ← CHANGE THIS VALUE (1 or 2)
+    /// 
+    #if VL53L5CX_FW_NBTAR_1
+        public const byte VL53L5CX_FW_NBTAR_RANGING = 1;
+    #else
+        //!!! CODE IS CURRENTLY CONFIGURED FOR 1 TARGET PER ZONE (VL53L5CX_FW_NBTAR_1 = 1) !!!
+        //public const byte VL53L5CX_FW_NBTAR_RANGING = 4;  // ← CHANGE THIS VALUE (1 up to 4)
+    #endif
     // ============================================================================
 
     /// <summary>
