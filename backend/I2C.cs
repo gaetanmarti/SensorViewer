@@ -351,6 +351,62 @@ public class I2C : IDisposable
     }
 
     // ==========================================
+    // 16-bit register address methods (for devices like VL53L5CX)
+    // ==========================================
+
+    /// <summary>
+    /// Reads a single byte from a 16-bit register address.
+    /// </summary>
+    /// <param name="reg">16-bit register address.</param>
+    /// <param name="token">Cancellation token.</param>
+    /// <returns>Byte value read from the register.</returns>
+    public byte ReadReg16(ushort reg, CancellationToken token = default)
+    {
+        byte[] addrBuffer = [(byte)((reg >> 8) & 0xFF), (byte)(reg & 0xFF)];
+        return ReadWithPointer(addrBuffer, 1, DefaultRetryCount, token)[0];
+    }
+
+    /// <summary>
+    /// Reads multiple consecutive bytes starting from a 16-bit register address.
+    /// </summary>
+    /// <param name="startReg">16-bit starting register address.</param>
+    /// <param name="count">Number of bytes to read.</param>
+    /// <param name="token">Cancellation token.</param>
+    /// <returns>Array of bytes read from consecutive registers.</returns>
+    public byte[] ReadRegs16(ushort startReg, int count, CancellationToken token = default)
+    {
+        byte[] addrBuffer = [(byte)((startReg >> 8) & 0xFF), (byte)(startReg & 0xFF)];
+        return ReadWithPointer(addrBuffer, count, DefaultRetryCount, token);
+    }
+
+    /// <summary>
+    /// Writes a single byte to a 16-bit register address.
+    /// </summary>
+    /// <param name="reg">16-bit register address.</param>
+    /// <param name="value">Byte value to write.</param>
+    /// <param name="token">Cancellation token.</param>
+    public void WriteReg16(ushort reg, byte value, CancellationToken token = default)
+    {
+        byte[] buffer = [(byte)((reg >> 8) & 0xFF), (byte)(reg & 0xFF), value];
+        WriteBytes(buffer, DefaultRetryCount, token);
+    }
+
+    /// <summary>
+    /// Writes multiple bytes to a 16-bit register address.
+    /// </summary>
+    /// <param name="reg">16-bit register address.</param>
+    /// <param name="data">Data bytes to write.</param>
+    /// <param name="token">Cancellation token.</param>
+    public void WriteRegs16(ushort reg, byte[] data, CancellationToken token = default)
+    {
+        byte[] buffer = new byte[2 + data.Length];
+        buffer[0] = (byte)((reg >> 8) & 0xFF);
+        buffer[1] = (byte)(reg & 0xFF);
+        Array.Copy(data, 0, buffer, 2, data.Length);
+        WriteBytes(buffer, DefaultRetryCount, token);
+    }
+
+    // ==========================================
     // Private helper methods
     // ==========================================
 

@@ -84,7 +84,7 @@ public class VL53L5CX : II2CDistanceSensor
     private readonly byte[] _tempBuffer = new byte[VL53L5CX_TEMP_BUFFER_SIZE];
     
     // Lock object for thread-safe initialization
-    private static readonly object _initLock = new();
+    private static readonly Lock _initLock = new();
 
     protected override I2C.TransferMode PreferredTransferMode => I2C.TransferMode.WriteRead;
 
@@ -106,7 +106,7 @@ public class VL53L5CX : II2CDistanceSensor
 
             // Check device ID (VL53L5CX uses 16-bit register addressing)
             SetBank(0x00, token);
-            byte deviceId = ReadReg16(0x0000, token);
+            byte deviceId = I2C.ReadReg16(0x0000, token);
             if (deviceId != DEVICE_ID && deviceId != 0x00) // 0x00 might be returned before sensor is fully booted
             {
                 Reset();
@@ -129,7 +129,7 @@ public class VL53L5CX : II2CDistanceSensor
     {
         if (_currentBank != bank)
         {
-            WriteReg16(0x7FFF, (byte)bank, token);
+            I2C.WriteReg16(0x7FFF, (byte)bank, token);
             _currentBank = bank;
         }
     }
@@ -307,29 +307,29 @@ public class VL53L5CX : II2CDistanceSensor
         // SW reboot sequence from ST vl53l5cx_init() lines 214-240
         // All these use 16-bit addressing (WrByte in ST = WriteReg16 here)
         SetBank(0x00, token);
-        WriteReg16(0x0009, 0x04, token);
-        WriteReg16(0x000F, 0x40, token);
-        WriteReg16(0x000A, 0x03, token);
+        I2C.WriteReg16(0x0009, 0x04, token);
+        I2C.WriteReg16(0x000F, 0x40, token);
+        I2C.WriteReg16(0x000A, 0x03, token);
         Thread.Sleep(1);
         
-        byte tmp = ReadReg16(0x7FFF, token);  // Read bank register (ST line 222)
-        WriteReg16(0x000C, 0x01, token);
+        byte tmp = I2C.ReadReg16(0x7FFF, token);  // Read bank register (ST line 222)
+        I2C.WriteReg16(0x000C, 0x01, token);
         
         // Config registers (ST lines 224-231)
-        WriteReg16(0x0101, 0x00, token);
-        WriteReg16(0x0102, 0x00, token);
-        WriteReg16(0x010A, 0x01, token);
-        WriteReg16(0x4002, 0x01, token);
-        WriteReg16(0x4002, 0x00, token);
-        WriteReg16(0x010A, 0x03, token);
-        WriteReg16(0x0103, 0x01, token);
+        I2C.WriteReg16(0x0101, 0x00, token);
+        I2C.WriteReg16(0x0102, 0x00, token);
+        I2C.WriteReg16(0x010A, 0x01, token);
+        I2C.WriteReg16(0x4002, 0x01, token);
+        I2C.WriteReg16(0x4002, 0x00, token);
+        I2C.WriteReg16(0x010A, 0x03, token);
+        I2C.WriteReg16(0x0103, 0x01, token);
         
         // Boot sequence (ST lines 232-240)
-        WriteReg16(0x000C, 0x00, token);
-        WriteReg16(0x000F, 0x43, token);
+        I2C.WriteReg16(0x000C, 0x00, token);
+        I2C.WriteReg16(0x000F, 0x43, token);
         Thread.Sleep(1);
-        WriteReg16(0x000F, 0x40, token);
-        WriteReg16(0x000A, 0x01, token);
+        I2C.WriteReg16(0x000F, 0x40, token);
+        I2C.WriteReg16(0x000A, 0x01, token);
         Thread.Sleep(100);
     }
 
@@ -345,11 +345,11 @@ public class VL53L5CX : II2CDistanceSensor
         // Enable FW access BEFORE firmware download (ST lines 244-258)
         CustomLogger.Log(this,  CustomLogger.LogLevel.Info, "Enabling FW access before firmware download...");
         
-        WriteReg16(0x000E, 0x01, token);
+        I2C.WriteReg16(0x000E, 0x01, token);
         SetBank(0x02, token);
         
         // Enable FW access command
-        WriteReg16(0x0003, 0x0D, token);
+        I2C.WriteReg16(0x0003, 0x0D, token);
         SetBank(0x01, token);
         
         // Poll for firmware ready (0x21 bit 0x10 == 0x10)
@@ -357,7 +357,7 @@ public class VL53L5CX : II2CDistanceSensor
         SetBank(0x00, token);
         
         // Enable host access to GO1
-        WriteReg16(0x000C, 0x01, token);
+        I2C.WriteReg16(0x000C, 0x01, token);
         
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "FW access enabled successfully");
     }
@@ -366,27 +366,27 @@ public class VL53L5CX : II2CDistanceSensor
     {
         // Power ON status configuration (ST lines 261-281)
         SetBank(0x00, token);
-        WriteReg16(0x0101, 0x00, token);
-        WriteReg16(0x0102, 0x00, token);
-        WriteReg16(0x010A, 0x01, token);
-        WriteReg16(0x4002, 0x01, token);
-        WriteReg16(0x4002, 0x00, token);
-        WriteReg16(0x010A, 0x03, token);
-        WriteReg16(0x0103, 0x01, token);
-        WriteReg16(0x400F, 0x00, token);
-        WriteReg16(0x021A, 0x43, token);
-        WriteReg16(0x021A, 0x03, token);
-        WriteReg16(0x021A, 0x01, token);
-        WriteReg16(0x021A, 0x00, token);
-        WriteReg16(0x0219, 0x00, token);
-        WriteReg16(0x021B, 0x00, token);
+        I2C.WriteReg16(0x0101, 0x00, token);
+        I2C.WriteReg16(0x0102, 0x00, token);
+        I2C.WriteReg16(0x010A, 0x01, token);
+        I2C.WriteReg16(0x4002, 0x01, token);
+        I2C.WriteReg16(0x4002, 0x00, token);
+        I2C.WriteReg16(0x010A, 0x03, token);
+        I2C.WriteReg16(0x0103, 0x01, token);
+        I2C.WriteReg16(0x400F, 0x00, token);
+        I2C.WriteReg16(0x021A, 0x43, token);
+        I2C.WriteReg16(0x021A, 0x03, token);
+        I2C.WriteReg16(0x021A, 0x01, token);
+        I2C.WriteReg16(0x021A, 0x00, token);
+        I2C.WriteReg16(0x0219, 0x00, token);
+        I2C.WriteReg16(0x021B, 0x00, token);
 
         // Wake up MCU (ST lines 274-281)
         SetBank(0x00, token);
-        WriteReg16(0x000C, 0x00, token);
+        I2C.WriteReg16(0x000C, 0x00, token);
         SetBank(0x01, token);
-        WriteReg16(0x0020, 0x07, token);
-        WriteReg16(0x0020, 0x06, token);
+        I2C.WriteReg16(0x0020, 0x07, token);
+        I2C.WriteReg16(0x0020, 0x06, token);
     }
 
     /// <summary>
@@ -407,7 +407,7 @@ public class VL53L5CX : II2CDistanceSensor
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Checking firmware state...");
             
             SetBank(0x00, token);
-            byte bootStatus = ReadReg16(0x0006, token);
+            byte bootStatus = I2C.ReadReg16(0x0006, token);
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"Boot status (0x06): 0x{bootStatus:X2}");
             
             if ((bootStatus & 0x01) != 0x01)
@@ -417,7 +417,7 @@ public class VL53L5CX : II2CDistanceSensor
             }
             
             SetBank(0x01, token);
-            byte fwStatus = ReadReg16(0x0021, token);
+            byte fwStatus = I2C.ReadReg16(0x0021, token);
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"Firmware status (0x21): 0x{fwStatus:X2}");
             SetBank(0x00, token);
             
@@ -460,13 +460,13 @@ public class VL53L5CX : II2CDistanceSensor
         
         // MCU reset sequence (same as end of DownloadFirmware)
         SetBank(0x00, token);
-        WriteReg16(0x0114, 0x00, token);
-        WriteReg16(0x0115, 0x00, token);
-        WriteReg16(0x0116, 0x42, token);
-        WriteReg16(0x0117, 0x00, token);
-        WriteReg16(0x000B, 0x00, token);
-        WriteReg16(0x000C, 0x00, token);
-        WriteReg16(0x000B, 0x01, token);
+        I2C.WriteReg16(0x0114, 0x00, token);
+        I2C.WriteReg16(0x0115, 0x00, token);
+        I2C.WriteReg16(0x0116, 0x42, token);
+        I2C.WriteReg16(0x0117, 0x00, token);
+        I2C.WriteReg16(0x000B, 0x00, token);
+        I2C.WriteReg16(0x000C, 0x00, token);
+        I2C.WriteReg16(0x000B, 0x01, token);
         
         // Wait a bit for MCU to reset
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Waiting for MCU to reset...");
@@ -482,7 +482,7 @@ public class VL53L5CX : II2CDistanceSensor
         while (Environment.TickCount - startTime < InitTimeoutMs)
         {
             token.ThrowIfCancellationRequested();
-            byte fwStatus = ReadReg16(0x0021, token);
+            byte fwStatus = I2C.ReadReg16(0x0021, token);
             
             if ((fwStatus & 0x10) == 0x10)
             {
@@ -598,14 +598,14 @@ public class VL53L5CX : II2CDistanceSensor
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Stopping ranging");
         
         SetBank(0x00, token);
-        WriteReg16(0x0009, 0x04, token);
+        I2C.WriteReg16(0x0009, 0x04, token);
         
         // Poll for command completion
         SetBank(0x00, token);
         int startTime = Environment.TickCount;
         while (Environment.TickCount - startTime < CommandTimeoutMs)
         {
-            byte[] status = ReadMultipleBytes(0x2C00, 4, token);
+            byte[] status = I2C.ReadRegs16(0x2C00, 4, token);
             if ((status[1] & 0x03) == 0x03)
                 break;
             Thread.Sleep(10);
@@ -619,18 +619,18 @@ public class VL53L5CX : II2CDistanceSensor
     {
         // Wakeup sequence from ST's vl53l5cx_set_power_mode (WAKEUP)
         SetBank(0x00, token);
-        byte bootStatus = ReadReg16(0x0006, token);
+        byte bootStatus = I2C.ReadReg16(0x0006, token);
         CustomLogger.Log(this, CustomLogger.LogLevel.Info,
             $"VL53L5CX: Pre-wakeup boot status=0x{bootStatus:X2}");
 
-        WriteReg16(0x0009, 0x04, token);
+        I2C.WriteReg16(0x0009, 0x04, token);
 
         int startTime = Environment.TickCount;
         bool ready = false;
         while (Environment.TickCount - startTime < CommandTimeoutMs)
         {
             token.ThrowIfCancellationRequested();
-            bootStatus = ReadReg16(0x0006, token);
+            bootStatus = I2C.ReadReg16(0x0006, token);
             if ((bootStatus & 0x01) == 0x01)
             {
                 ready = true;
@@ -650,8 +650,8 @@ public class VL53L5CX : II2CDistanceSensor
     {
         // Enable host access to GO1 (ST init sequence)
         SetBank(0x00, token);
-        WriteReg16(0x000C, 0x01, token);
-        byte access = ReadReg16(0x000C, token);
+        I2C.WriteReg16(0x000C, 0x01, token);
+        byte access = I2C.ReadReg16(0x000C, token);
         CustomLogger.Log(this, CustomLogger.LogLevel.Info,
             $"VL53L5CX: Host access 0x000C=0x{access:X2}");
     }
@@ -659,11 +659,11 @@ public class VL53L5CX : II2CDistanceSensor
     private void ReadNvmOffsetData(CancellationToken token = default)
     {
         SetBank(0x02, token);
-        WriteReg16(0x2FD8, VL53L5CXFirmware.VL53L5CX_GET_NVM_CMD, token);
+        I2C.WriteRegs16(0x2FD8, VL53L5CXFirmware.VL53L5CX_GET_NVM_CMD, token);
         // Note: PollForAnswer reads in current bank (0x02), as per ST's C++ implementation
         PollForAnswer(4, 0, REG_UI_CMD_STATUS, 0xFF, 0x02, 2000, 10, token);
 
-        byte[] nvm = ReadMultipleBytes(REG_UI_CMD_START, VL53L5CX_NVM_DATA_SIZE, token);
+        byte[] nvm = I2C.ReadRegs16(REG_UI_CMD_START, VL53L5CX_NVM_DATA_SIZE, token);
         Array.Copy(nvm, _offsetData, Math.Min(_offsetData.Length, nvm.Length));
     }
 
@@ -719,7 +719,7 @@ public class VL53L5CX : II2CDistanceSensor
 
         Array.Copy(footer, 0, _tempBuffer, 0x1E0, footer.Length);
 
-        WriteReg16(0x2E18, _tempBuffer.AsSpan(0, VL53L5CX_OFFSET_BUFFER_SIZE).ToArray(), token);
+        I2C.WriteRegs16(0x2E18, _tempBuffer.AsSpan(0, VL53L5CX_OFFSET_BUFFER_SIZE).ToArray(), token);
         // Note: Bank 0x02 already active (reads in current bank)
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "SendOffsetData: Polling for command completion...");
         PollForAnswer(4, 1, REG_UI_CMD_STATUS, 0xFF, 0x03, 2000, 10, token);
@@ -777,7 +777,7 @@ public class VL53L5CX : II2CDistanceSensor
         }
 
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"SendXtalkData: Writing {VL53L5CX_XTALK_BUFFER_SIZE} bytes to 0x2CF8 (resolution={resolution})");
-        WriteReg16(0x2CF8, _tempBuffer.AsSpan(0, VL53L5CX_XTALK_BUFFER_SIZE).ToArray(), token);
+        I2C.WriteRegs16(0x2CF8, _tempBuffer.AsSpan(0, VL53L5CX_XTALK_BUFFER_SIZE).ToArray(), token);
         // Note: Bank 0x02 already active (reads in current bank)
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "SendXtalkData: Polling for command completion...");
         PollForAnswer(4, 1, REG_UI_CMD_STATUS, 0xFF, 0x03, 2000, 10, token);
@@ -793,7 +793,7 @@ public class VL53L5CX : II2CDistanceSensor
         // ST writes the full config to 0x2c34 in one transaction, not in segments
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
             $"WriteDefaultConfiguration: Writing {VL53L5CXFirmware.VL53L5CX_DEFAULT_CONFIGURATION.Length} bytes to 0x2C34");
-        WriteReg16(0x2C34, VL53L5CXFirmware.VL53L5CX_DEFAULT_CONFIGURATION, token);
+        I2C.WriteRegs16(0x2C34, VL53L5CXFirmware.VL53L5CX_DEFAULT_CONFIGURATION, token);
 
         // Note: Bank 0x02 already active (reads in current bank)
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "WriteDefaultConfiguration: Polling for command completion...");
@@ -821,7 +821,7 @@ public class VL53L5CX : II2CDistanceSensor
         {
             token.ThrowIfCancellationRequested();
             // NOTE: Do NOT change bank here - read in current bank (as per ST's C++ implementation)
-            byte[] status = ReadMultipleBytes(address, size, token);
+            byte[] status = I2C.ReadRegs16(address, size, token);
             Array.Copy(status, _tempBuffer, Math.Min(status.Length, _tempBuffer.Length));
 
             if (size >= 4 && (_tempBuffer[2] & 0x80) == 0x80)
@@ -863,11 +863,11 @@ public class VL53L5CX : II2CDistanceSensor
         cmd[3] = (byte)((dataSize & 0x0F) << 4);
 
         // CRITICAL: DCI operations work in CURRENT bank (bank 0x02)
-        WriteReg16((ushort)(REG_UI_CMD_END - 11), cmd, token);
+        I2C.WriteRegs16((ushort)(REG_UI_CMD_END - 11), cmd, token);
         // Poll in current bank (bank 0x02)
         PollForAnswer(4, 1, REG_UI_CMD_STATUS, 0xFF, 0x03, 2000, 10, token);
 
-        byte[] buffer = ReadMultipleBytes(REG_UI_CMD_START, dataSize + 12, token);
+        byte[] buffer = I2C.ReadRegs16(REG_UI_CMD_START, dataSize + 12, token);
         SwapBuffer(buffer, buffer.Length);
 
         Array.Copy(buffer, 4, data, 0, dataSize);
@@ -1008,14 +1008,14 @@ public class VL53L5CX : II2CDistanceSensor
             
             // Start xshut bypass - ST's exact sequence (NO status verification in between!)
             SetBank(0x00, token);
-            WriteReg16(0x0009, 0x05, token);
+            I2C.WriteReg16(0x0009, 0x05, token);
             SetBank(0x02, token);
 
             // Start ranging session (UI command region 0x2C00-0x2FFF is in bank 0x02)
             // NOTE: Stay in bank 0x02 - do NOT switch to bank 0x00 here!
             byte[] cmd = [0x00, 0x03, 0x00, 0x00];
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Writing ranging start command to 0x2FFC...");
-            WriteReg16(0x2FFC, cmd, token);
+            I2C.WriteRegs16(0x2FFC, cmd, token);
 
             // Poll for command accepted (in bank 0x02 where we already are)
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: Polling for ranging command acceptance...");
@@ -1070,7 +1070,7 @@ public class VL53L5CX : II2CDistanceSensor
         // Read 4 bytes from address 0x0 in current bank (bank 0x02 for ranging data)
         // ST's C++: RdMulti(&(p_dev->platform), 0x0, p_dev->temp_buffer, 4)
         SetBank(0x02, token);
-        byte[] statusBytes = ReadMultipleBytes(0x0000, 4, token);
+        byte[] statusBytes = I2C.ReadRegs16(0x0000, 4, token);
 
         CustomLogger.Log(this, CustomLogger.LogLevel.Info,
             $"CheckDataReady: status=[0x{statusBytes[0]:X2}, 0x{statusBytes[1]:X2}, 0x{statusBytes[2]:X2}, 0x{statusBytes[3]:X2}], streamcount={_streamcount}");
@@ -1138,7 +1138,7 @@ public class VL53L5CX : II2CDistanceSensor
 
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "VL53L5CX: ReadOnce - data ready, reading buffer...");
             SetBank(0x02, token);
-            buffer = ReadMultipleBytes(0x0000, dataSize, token);
+            buffer = I2C.ReadRegs16(0x0000, dataSize, token);
             
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
                 $"VL53L5CX: ReadOnce - buffer read BEFORE swap, bytes 12-19: [{string.Join(", ", buffer.Skip(12).Take(8).Select(b => $"0x{b:X2}"))}]");
@@ -1298,7 +1298,7 @@ public class VL53L5CX : II2CDistanceSensor
         // ST's vl53l5cx_dci_write_data() does NOT change bank - uses current bank (0x02)
         // Bank 0x02 must be active before calling DciWriteData (set by caller)
         // DO NOT call SetBank here - it causes DCI operations to fail!
-        WriteReg16(address, _tempBuffer.AsSpan(0, dataSize + 12).ToArray(), token);
+        I2C.WriteRegs16(address, _tempBuffer.AsSpan(0, dataSize + 12).ToArray(), token);
         
         // Poll in current bank (bank 0x02) - ST's code does NOT change bank
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
@@ -1313,40 +1313,6 @@ public class VL53L5CX : II2CDistanceSensor
         byte[] buffer = new byte[values.Length * 4];
         Buffer.BlockCopy(values, 0, buffer, 0, buffer.Length);
         return buffer;
-    }
-
-    // Helper methods for 16-bit register access (VL53L5CX uses 16-bit addresses)
-    private void WriteReg16(ushort reg, byte value, CancellationToken token = default)
-    {
-        byte[] buffer = [(byte)((reg >> 8) & 0xFF), (byte)(reg & 0xFF), value];
-        I2C.WriteBytes(buffer, 1, token);
-    }
-
-    /// <summary>
-    /// Write multiple bytes to a 16-bit register address
-    /// </summary>
-    private void WriteReg16(ushort reg, byte[] data, CancellationToken token = default)
-    {
-        byte[] buffer = new byte[2 + data.Length];
-        buffer[0] = (byte)((reg >> 8) & 0xFF);
-        buffer[1] = (byte)(reg & 0xFF);
-        Array.Copy(data, 0, buffer, 2, data.Length);
-        I2C.WriteBytes(buffer, 1, token);
-    }
-
-    private byte ReadReg16(ushort reg, CancellationToken token = default)
-    {
-        byte[] addrBuffer = [(byte)((reg >> 8) & 0xFF), (byte)(reg & 0xFF)];
-        return I2C.ReadWithPointer(addrBuffer, 1, 1, token)[0];
-    }
-    
-    /// <summary>
-    /// Read multiple bytes from a 16-bit register address in a single I2C transaction
-    /// </summary>
-    private byte[] ReadMultipleBytes(ushort reg, int count, CancellationToken token = default)
-    {
-        byte[] addrBuffer = [(byte)((reg >> 8) & 0xFF), (byte)(reg & 0xFF)];
-        return I2C.ReadWithPointer(addrBuffer, count, 1, token);
     }
 
     // NOTE: Firmware download implementation would go here
@@ -1384,7 +1350,7 @@ public class VL53L5CX : II2CDistanceSensor
                 int size = Math.Min(32, chunk1.Length - offset);
                 byte[] segment = new byte[size];
                 Array.Copy(chunk1, offset, segment, 0, size);
-                WriteReg16((ushort)offset, segment, token);
+                I2C.WriteRegs16((ushort)offset, segment, token);
             }
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Firmware chunk 1 downloaded successfully");
             
@@ -1402,7 +1368,7 @@ public class VL53L5CX : II2CDistanceSensor
                 int size = Math.Min(32, chunk2.Length - offset);
                 byte[] segment = new byte[size];
                 Array.Copy(chunk2, offset, segment, 0, size);
-                WriteReg16((ushort)offset, segment, token);
+                I2C.WriteRegs16((ushort)offset, segment, token);
             }
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Firmware chunk 2 downloaded successfully");
             
@@ -1420,7 +1386,7 @@ public class VL53L5CX : II2CDistanceSensor
                 int size = Math.Min(32, chunk3.Length - offset);
                 byte[] segment = new byte[size];
                 Array.Copy(chunk3, offset, segment, 0, size);
-                WriteReg16((ushort)offset, segment, token);
+                I2C.WriteRegs16((ushort)offset, segment, token);
             }
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Firmware chunk 3 downloaded successfully");
             
@@ -1431,7 +1397,7 @@ public class VL53L5CX : II2CDistanceSensor
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Verifying firmware download...");
             SetBank(0x02, token);
             Thread.Sleep(5);  // Small delay after bank switch
-            WriteReg16(0x0003, 0x0D, token);  // Verification command
+            I2C.WriteReg16(0x0003, 0x0D, token);  // Verification command
             SetBank(0x01, token);
             Thread.Sleep(5);  // Small delay after bank switch
             
@@ -1444,17 +1410,17 @@ public class VL53L5CX : II2CDistanceSensor
             SetBank(0x00, token);
             
             // Enable host access to GO1
-            WriteReg16(0x000C, 0x01, token);  // Host access command
+            I2C.WriteReg16(0x000C, 0x01, token);  // Host access command
             
             // Reset MCU to start the firmware
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Resetting MCU to start firmware...");
-            WriteReg16(0x0114, 0x00, token);
-            WriteReg16(0x0115, 0x00, token);
-            WriteReg16(0x0116, 0x42, token);
-            WriteReg16(0x0117, 0x00, token);
-            WriteReg16(0x000B, 0x00, token);
-            WriteReg16(0x000C, 0x00, token);
-            WriteReg16(0x000B, 0x01, token);
+            I2C.WriteReg16(0x0114, 0x00, token);
+            I2C.WriteReg16(0x0115, 0x00, token);
+            I2C.WriteReg16(0x0116, 0x42, token);
+            I2C.WriteReg16(0x0117, 0x00, token);
+            I2C.WriteReg16(0x000B, 0x00, token);
+            I2C.WriteReg16(0x000C, 0x00, token);
+            I2C.WriteReg16(0x000B, 0x01, token);
             
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, "Waiting for MCU reset (register 0x06 should become 0x00)");
             // Wait for MCU to enter reset state (register 0x06 should become 0x00)
@@ -1467,7 +1433,7 @@ public class VL53L5CX : II2CDistanceSensor
                 {
                     token.ThrowIfCancellationRequested();
                     // Note: Do NOT change bank - already in bank 0x00
-                    byte bootStatus = ReadReg16(0x0006, token);
+                    byte bootStatus = I2C.ReadReg16(0x0006, token);
                     iterations++;
                     
                     if (iterations <= 5 || iterations % 50 == 0)
