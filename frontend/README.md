@@ -79,6 +79,12 @@ npm run build
 yarn build
 ```
 
+### Build and Deploy to Backend
+Builds the frontend and copies the output to the backend's webapp folder in one step:
+```bash
+npm run build:backend
+```
+
 ## Configuration
 
 ### API Base URL

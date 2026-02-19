@@ -369,7 +369,10 @@
           </div>
         </div>
         
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <div 
+          role="application"
+          aria-label="3D distance sensor view, drag to rotate"
           class="bg-gradient-to-b from-gray-800 to-gray-900 rounded-lg p-6 overflow-hidden relative select-none"
           style="cursor: {isDragging ? 'grabbing' : 'grab'};"
           onmousedown={handleMouseDown}
