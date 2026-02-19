@@ -36,15 +36,15 @@
   let objectTempHistory = $state([]);
   let ambientShockHistory = $state([]);
 
-  // Chart.js instances
-  let presenceCanvas;
-  let motionCanvas;
-  let objectTempCanvas;
-  let ambientShockCanvas;
-  let presenceChart;
-  let motionChart;
-  let objectTempChart;
-  let ambientShockChart;
+  // Chart.js instances and canvas elements
+  let presenceCanvas = $state(null);
+  let motionCanvas = $state(null);
+  let objectTempCanvas = $state(null);
+  let ambientShockCanvas = $state(null);
+  let presenceChart = $state(null);
+  let motionChart = $state(null);
+  let objectTempChart = $state(null);
+  let ambientShockChart = $state(null);
 
   /**
    * Fetch sensor specifications
@@ -230,12 +230,6 @@
     startPolling();
     
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    // Create charts
-    presenceChart = createChart(presenceCanvas, 'rgba(16, 185, 129, 1)', 'Presence');
-    motionChart = createChart(motionCanvas, 'rgba(234, 179, 8, 1)', 'Motion');
-    objectTempChart = createChart(objectTempCanvas, 'rgba(239, 68, 68, 1)', 'Object Temp');
-    ambientShockChart = createChart(ambientShockCanvas, 'rgba(249, 115, 22, 1)', 'Ambient Shock');
   });
 
   onDestroy(() => {
@@ -249,27 +243,52 @@
     if (ambientShockChart) ambientShockChart.destroy();
   });
 
-  // Update charts when history changes
+  // Destroy charts when an error occurs so they are recreated when data comes back
   $effect(() => {
-    if (presenceHistory.length > 0) {
+    if (error) {
+      if (presenceChart) { presenceChart.destroy(); presenceChart = null; }
+      if (motionChart) { motionChart.destroy(); motionChart = null; }
+      if (objectTempChart) { objectTempChart.destroy(); objectTempChart = null; }
+      if (ambientShockChart) { ambientShockChart.destroy(); ambientShockChart = null; }
+    }
+  });
+
+  // Create and update presence chart
+  $effect(() => {
+    if (presenceCanvas && !presenceChart) {
+      presenceChart = createChart(presenceCanvas, 'rgba(16, 185, 129, 1)', 'Presence');
+    }
+    if (presenceChart && presenceHistory.length > 0) {
       updateChart(presenceChart, presenceHistory);
     }
   });
 
+  // Create and update motion chart
   $effect(() => {
-    if (motionHistory.length > 0) {
+    if (motionCanvas && !motionChart) {
+      motionChart = createChart(motionCanvas, 'rgba(234, 179, 8, 1)', 'Motion');
+    }
+    if (motionChart && motionHistory.length > 0) {
       updateChart(motionChart, motionHistory);
     }
   });
 
+  // Create and update object temperature chart
   $effect(() => {
-    if (objectTempHistory.length > 0) {
+    if (objectTempCanvas && !objectTempChart) {
+      objectTempChart = createChart(objectTempCanvas, 'rgba(239, 68, 68, 1)', 'Object Temp');
+    }
+    if (objectTempChart && objectTempHistory.length > 0) {
       updateChart(objectTempChart, objectTempHistory);
     }
   });
 
+  // Create and update ambient shock chart
   $effect(() => {
-    if (ambientShockHistory.length > 0) {
+    if (ambientShockCanvas && !ambientShockChart) {
+      ambientShockChart = createChart(ambientShockCanvas, 'rgba(249, 115, 22, 1)', 'Ambient Shock');
+    }
+    if (ambientShockChart && ambientShockHistory.length > 0) {
       updateChart(ambientShockChart, ambientShockHistory);
     }
   });
@@ -323,8 +342,9 @@
       <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
       <span class="ml-3 text-gray-600">Loading measurements...</span>
     </div>
-  {:else if measurement}
+  {:else if measurement || presenceHistory.length > 0}
     <!-- Temperature Display -->
+    {#if measurement}
     <div class="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
       <div class="grid grid-cols-2 gap-4 text-center text-sm">
         <div>
@@ -355,14 +375,16 @@
         </div>
       </div>
     </div>
+    {/if}
 
-    <!-- Graphs -->
+    <!-- Graphs (hidden when error) -->
+    {#if !error}
     <div class="mt-4 space-y-4">
       <!-- Presence Graph -->
       <div class="px-2 py-3 bg-gray-50 rounded-lg border border-gray-200">
         <div class="flex items-center justify-between mb-2 px-1">
           <div class="text-sm font-medium text-gray-700">Presence Value</div>
-          <div class="text-xs text-gray-500">{formatValue(measurement.presenceValue)}</div>
+          <div class="text-xs text-gray-500">{measurement ? formatValue(measurement.presenceValue) : '-'}</div>
         </div>
         <div class="h-16">
           <canvas bind:this={presenceCanvas}></canvas>
@@ -373,7 +395,7 @@
       <div class="px-2 py-3 bg-gray-50 rounded-lg border border-gray-200">
         <div class="flex items-center justify-between mb-2 px-1">
           <div class="text-sm font-medium text-gray-700">Motion Value</div>
-          <div class="text-xs text-gray-500">{formatValue(measurement.motionValue)}</div>
+          <div class="text-xs text-gray-500">{measurement ? formatValue(measurement.motionValue) : '-'}</div>
         </div>
         <div class="h-16">
           <canvas bind:this={motionCanvas}></canvas>
@@ -384,7 +406,7 @@
       <div class="px-2 py-3 bg-gray-50 rounded-lg border border-gray-200">
         <div class="flex items-center justify-between mb-2 px-1">
           <div class="text-sm font-medium text-gray-700">Object Temperature</div>
-          <div class="text-xs text-gray-500">{formatTemperature(measurement.objectTemperatureCelsius)}°C</div>
+          <div class="text-xs text-gray-500">{measurement ? formatTemperature(measurement.objectTemperatureCelsius) + '°C' : '-'}</div>
         </div>
         <div class="h-16">
           <canvas bind:this={objectTempCanvas}></canvas>
@@ -395,13 +417,14 @@
       <div class="px-2 py-3 bg-gray-50 rounded-lg border border-gray-200">
         <div class="flex items-center justify-between mb-2 px-1">
           <div class="text-sm font-medium text-gray-700">Ambient Shock Value</div>
-          <div class="text-xs text-gray-500">{formatValue(measurement.ambientShockValue)}</div>
+          <div class="text-xs text-gray-500">{measurement ? formatValue(measurement.ambientShockValue) : '-'}</div>
         </div>
         <div class="h-16">
           <canvas bind:this={ambientShockCanvas}></canvas>
         </div>
       </div>
     </div>
+    {/if}
   {:else if !error}
     <!-- No Data State -->
     <div class="mt-3 p-3 bg-gray-50 rounded text-sm text-gray-600 text-center">

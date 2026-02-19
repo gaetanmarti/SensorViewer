@@ -38,9 +38,10 @@ public abstract class II2CDevice (int address)
 
     /// <summary>
     /// Frame rate in Hz for caching purposes.
-    /// If not overridden by derived classes, defaults to 10 Hz.
+    /// If set to 0 or less, caching is disabled.
+    /// Derived classes should override this with their actual frame rate.
     /// </summary>
-    public virtual float FrameRateHz { get; protected set; } = 10.0f;
+    public virtual float FrameRateHz { get; protected set; } = 0.0f;
 
     /// <summary>
     /// Cached measurement result to avoid duplicate reads within the same frame period.
@@ -215,9 +216,14 @@ public abstract class II2CDevice (int address)
     /// <summary>
     /// Generic method to handle caching logic for any measurement type.
     /// Used by derived classes to implement their ReadOnce() methods.
+    /// If FrameRateHz is set to 0 or less, caching is disabled.
     /// </summary>
     protected T GetCachedOrCompute<T>(Func<T> compute) where T : notnull
     {
+        // If caching is disabled, always compute fresh data
+        if (FrameRateHz <= 0)
+            return compute();
+
         lock (_cacheLock)
         {
             var now = DateTime.UtcNow;
@@ -279,7 +285,9 @@ public abstract class II2CDistanceSensor : II2CDevice
         if (!Initialized)
             throw new InvalidOperationException("Sensor not initialized. Call Initialize() first.");
 
-        return GetCachedOrCompute(() => ReadOnceInternal(TimeoutMs, token));
+        var cached = GetCachedOrCompute(() => ReadOnceInternal(TimeoutMs, token));
+        // Return a copy to prevent external modifications
+        return new List<(int distMM, float confidence)>(cached);
     }
 
     /// <summary>
@@ -338,30 +346,13 @@ public abstract class II2CThermalSensor : II2CDevice
         if (!Initialized)
             throw new InvalidOperationException("Sensor not initialized. Call Initialize() first.");
 
-        lock (_cacheLock)
-        {
-            var now = DateTime.UtcNow;
-            double cacheValidityMs = 1000.0 / FrameRateHz;
-            
-            if (_cachedResult is float[,] cachedData && (now - _cacheTimestamp).TotalMilliseconds < cacheValidityMs)
-            {
-                // Return a copy of the cached data to prevent external modifications
-                var result = new float[cachedData.GetLength(0), cachedData.GetLength(1)];
-                Array.Copy(cachedData, result, cachedData.Length);
-                return result;
-            }
-
-            // Cache is invalid or missing, read new data
-            var specs = CurrentSpecifications();
-            var newData = ReadOnceInternal(TimeoutMs, token);
-            _cachedResult = newData;
-            _cacheTimestamp = DateTime.UtcNow;
-            
-            // Return a copy of the newly cached data
-            var freshResult = new float[specs.Height, specs.Width];
-            Array.Copy(newData, freshResult, newData.Length);
-            return freshResult;
-        }
+        var specs = CurrentSpecifications();
+        var cached = GetCachedOrCompute(() => ReadOnceInternal(TimeoutMs, token));
+        
+        // Return a copy to prevent external modifications
+        var result = new float[specs.Height, specs.Width];
+        Array.Copy(cached, result, cached.Length);
+        return result;
     }
 
     /// <summary>

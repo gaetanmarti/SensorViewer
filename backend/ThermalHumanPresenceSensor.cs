@@ -153,11 +153,10 @@ public class ThermalHumanPresenceSensor : II2CHumanPresenceSensor
     {
         try
         {
-            var specs = ThermalSensor.CurrentSpecifications();
-            int delayMs = (int)(1000.0 / specs.UpdateRateHz);
+            int delayMs = (int)(1000.0 / ThermalSensor.FrameRateHz);
 
             CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
-                $"Processing thread running at {specs.UpdateRateHz} Hz (delay: {delayMs} ms)");
+                $"Processing thread running at {ThermalSensor.FrameRateHz} Hz (delay: {delayMs} ms)");
 
             while (!token.IsCancellationRequested)
             {
@@ -208,6 +207,95 @@ public class ThermalHumanPresenceSensor : II2CHumanPresenceSensor
         }
     }
 
+    private class Pixel
+    {
+        public const float ErrorTemperature = -1000.0f;
+        public const float AlphaInactive = 0.01f;
+        public const float AlphaActive = AlphaInactive / 100;
+        public const float HumanPresenceTemperatureDiff = 4.0f; // Minimum temperature difference to consider human presence
+        public const float PresenceThreshold = 100f; // Minimum activity value to consider presence (tuned based on sensor characteristics)
+        
+        public float BackgroundTemperature { get; private set; } = ErrorTemperature;
+
+        public float Temperature { get; private set; } = ErrorTemperature;
+        public long Counter { get; private set; } = 0;
+    
+        public bool IsActive { get; private set; } = false;
+
+        public float Diff { get {
+            return Temperature - BackgroundTemperature;
+        } }
+
+        // --- Noise estimation algo ---
+        /*
+        public const float SensorTypicalNoise = 0.50f;
+
+        private const int noiseSamples = 64;
+        private readonly float[] _noiseBuffer = new float[noiseSamples];
+        private int _noiseIndex = 0;
+        private int _noiseCount = 0;
+
+        public float Noise { get; private set; } = SensorTypicalNoise;
+
+        private void ComputePixelNoise(float diff)
+        {
+            _noiseBuffer[_noiseIndex] = diff;
+            _noiseIndex = (_noiseIndex + 1) % noiseSamples;
+            _noiseCount = Math.Min(_noiseCount + 1, noiseSamples);
+
+            if (_noiseCount < noiseSamples) {
+                Noise = SensorTypicalNoise;
+                return;
+            }
+
+            // Median
+            var sorted = _noiseBuffer.OrderBy(x => x).ToArray();
+            var median = sorted[noiseSamples / 2];
+
+            // MAD
+            var absDev = _noiseBuffer.Select(x => Math.Abs(x - median)).OrderBy(x => x).ToArray();
+            var mad = absDev[noiseSamples / 2];
+
+            Noise = 1.4826f * mad;
+        }
+        */
+        
+        public void Reset()
+        {
+            Counter = 0;
+            //_noiseIndex = _noiseCount = 0;
+            //Noise = SensorTypicalNoise;
+        }
+        
+        // From AMG88 datasheet:
+        // "Temperature accuracy is typically ±2.5 °C"
+        // "To have more than 4 °C of temperature difference from background"
+        public void Update(float newTemperature, float threshold = HumanPresenceTemperatureDiff)
+        {
+            Temperature = newTemperature;
+
+            if (Counter++ == 0)
+            {
+                BackgroundTemperature = newTemperature;    
+                IsActive = false;
+                return;
+            }
+            
+            var diff = Temperature - BackgroundTemperature;
+
+            IsActive = diff > threshold;
+
+            // This code use the MAD method to estimate pixel noise and define if pixel is active or not.
+            //if (!IsActive)
+            //    ComputePixelNoise(diff);
+
+            var alpha = IsActive ? AlphaActive : AlphaInactive;
+            BackgroundTemperature = BackgroundTemperature * (1 - alpha) + Temperature * alpha;
+        }
+    }
+
+    Pixel[,]? _pixels = null;
+
     /// <summary>
     /// Update presence detection based on thermal data.
     /// This is where the actual presence detection algorithm will be implemented.
@@ -217,43 +305,76 @@ public class ThermalHumanPresenceSensor : II2CHumanPresenceSensor
     /// <returns>Updated presence measurement.</returns>
     private PresenceMeasurement Update(float[,] thermalData, CancellationToken token)
     {
-        // TODO: Implement actual presence detection algorithm
-        // For now, return placeholder values based on thermal data
-        
+        int height = thermalData.GetLength(0);
+        int width  = thermalData.GetLength(1);
+
+        if (_pixels == null) {
+            _pixels = new Pixel[height, width];
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                    _pixels[y, x] = new Pixel();
+        }
+        else if (_pixels.GetLength(0) != height || _pixels.GetLength(1) != width)
+            throw new InvalidOperationException($"Thermal data dimensions ({height}x{width}) do not match pixel array dimensions ({_pixels.GetLength(0)}x{_pixels.GetLength(1)})");
+    
         token.ThrowIfCancellationRequested();
         
         // Placeholder: Calculate some basic statistics from thermal data
-        float minTemp = float.MaxValue;
-        float maxTemp = float.MinValue;
-        float sumTemp = 0;
-        int count = 0;
+        float sumBackgroundTemp = 0.0f;
+        float sumObjectTemp = 0.0f;
+        float sumSqDiff = 0.0f;
+        float sumNoise = 0.0f;
+        int   countBackground = 0;
+        int   countObject = 0;
         
-        for (int y = 0; y < thermalData.GetLength(0); y++)
+        for (int y = 0; y < height; y++)
         {
-            for (int x = 0; x < thermalData.GetLength(1); x++)
+            for (int x = 0; x < width; x++)
             {
                 float temp = thermalData[y, x];
-                minTemp = Math.Min(minTemp, temp);
-                maxTemp = Math.Max(maxTemp, temp);
-                sumTemp += temp;
-                count++;
+                var pixel = _pixels[y, x];
+                pixel.Update(temp);
+                sumSqDiff += pixel.Diff * pixel.Diff;
+                sumNoise += pixel.Noise;
+
+                if (pixel.IsActive)
+                {
+                    sumObjectTemp += temp;
+                    countObject++;
+                }
+                else
+                {
+                    sumBackgroundTemp += temp;
+                    countBackground++;
+                }
             }
         }
+
+        float activityRMS = (float)Math.Sqrt((double) sumSqDiff);
+
+        int count = countBackground + countObject;
+        var tempBackground = countBackground > 0 ? sumBackgroundTemp / countBackground : 0.0f;
+        var tempObject = countObject > 0 ? sumObjectTemp / countObject : tempBackground;
         
-        float avgTemp = count > 0 ? sumTemp / count : 20.0f;
-        
-        // TODO: Real algorithm to detect:
-        // - Human presence (check for warm areas in human temperature range)
+        const float scale = 1000.0f; // Scale activity to a more human-friendly range
+
+        var presenceThreshold = (sumNoise / count) * scale;
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+            $"Presence update: tempBackground={tempBackground:F2}°C, tempObject={tempObject:F2}°C, activity={activityRMS:F2}, noise={sumNoise/count:F2}, presenceThreshold={presenceThreshold:F2}");
+
         // - Motion (compare with previous frames)
         // - Ambient shock (detect sudden temperature changes)
         
+        // - Human presence (check for warm areas in human temperature range)
+        int activity = (int)(scale * activityRMS / (float) count);
+
         return new PresenceMeasurement(
-            PresenceDetected: false,           // TODO: Implement detection
+            PresenceDetected: activity > Pixel.PresenceThreshold,     
             MotionDetected: false,              // TODO: Implement motion detection
             AmbientShockDetected: false,        // TODO: Implement shock detection
-            AmbientTemperatureCelsius: minTemp, // Using min temp as ambient proxy
-            ObjectTemperatureCelsius: maxTemp,  // Using max temp as object proxy
-            PresenceValue: 0,                   // TODO: Confidence score
+            AmbientTemperatureCelsius: tempBackground,
+            ObjectTemperatureCelsius: tempObject,  
+            PresenceValue: activity,  
             MotionValue: 0,                     // TODO: Motion intensity
             AmbientShockValue: 0                // TODO: Shock intensity
         );

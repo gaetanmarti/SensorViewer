@@ -86,9 +86,65 @@ public class TMF882X: II2CDistanceSensor
     const ushort DefaultPeriodMs = 34; // Measurement period in milliseconds
     const ushort DefaultKiloIterations = 550; // Measurement iterations times * 1024
 
+    // Store the current measurement period for frame rate calculation
+    private ushort _currentPeriodMs = DefaultPeriodMs;
+
     // Default timeouts (ms)
     public int CommandTimeoutMs { get; set; } = 1000;
     public int AppIdTimeoutMs { get; set; } = 10;
+
+    /// <summary>
+    /// Override FrameRateHz to compute from the measurement period.
+    /// Frame rate (Hz) = 1000 / periodMs
+    /// </summary>
+    public override float FrameRateHz
+    {
+        get => _currentPeriodMs > 0 ? 1000.0f / _currentPeriodMs : 0.0f;
+        protected set { } // Ignore sets, frame rate is determined by period
+    }
+
+    /// <summary>
+    /// Reads the current measurement period from the device registers.
+    /// Returns the period in milliseconds.
+    /// Note: This method assumes the device is in Common Config page mode.
+    /// </summary>
+    public ushort ReadPeriodFromDevice(CancellationToken token = default)
+    {
+        byte lsb = I2C.ReadReg(REG_PERIOD_LSB, token);
+        byte msb = I2C.ReadReg(REG_PERIOD_MSB, token);
+        ushort periodMs = (ushort)(lsb | ((ushort)msb << 8));
+        _currentPeriodMs = periodMs;
+        return periodMs;
+    }
+
+    /// <summary>
+    /// Gets the current measurement period in milliseconds from the cached value.
+    /// </summary>
+    public ushort GetPeriodMs() => _currentPeriodMs;
+
+    /// <summary>
+    /// Computes the frame rate (Hz) based on the given period in milliseconds.
+    /// Formula: frameRateHz = 1000.0 / periodMs
+    /// </summary>
+    /// <param name="periodMs">The measurement period in milliseconds.</param>
+    /// <returns>The computed frame rate in Hz.</returns>
+    public static float ComputeFrameRate(ushort periodMs)
+    {
+        return periodMs > 0 ? 1000.0f / periodMs : 0.0f;
+    }
+
+    /// <summary>
+    /// Computes the measurement period (system ticks in milliseconds) from the given frame rate.
+    /// Formula: periodMs = 1000.0 / frameRateHz
+    /// </summary>
+    /// <param name="frameRateHz">The desired frame rate in Hz.</param>
+    /// <returns>The computed period in milliseconds.</returns>
+    public static ushort ComputePeriodFromFrameRate(float frameRateHz)
+    {
+        if (frameRateHz <= 0)
+            return DefaultPeriodMs;
+        return (ushort)Math.Round(1000.0f / frameRateHz);
+    }
 
     /// <summary>
     /// Initializes the TMF882X sensor with the specified configuration.
@@ -123,6 +179,8 @@ public class TMF882X: II2CDistanceSensor
 
         var periodMs = config.TryGetValue("periodMs", out string? value) ? ushort.Parse(value) : DefaultPeriodMs;
         var kiloIterations = config.TryGetValue("kiloIterations", out value) ? ushort.Parse(value) : DefaultKiloIterations;
+
+        _currentPeriodMs = periodMs;
 
         if (!IsEnabled())
             throw new Exception("TMF882X is not enabled after initialization.");
