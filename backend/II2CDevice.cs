@@ -211,6 +211,29 @@ public abstract class II2CDevice (int address)
             return _cachedResult;
         }
     }
+
+    /// <summary>
+    /// Generic method to handle caching logic for any measurement type.
+    /// Used by derived classes to implement their ReadOnce() methods.
+    /// </summary>
+    protected T GetCachedOrCompute<T>(Func<T> compute) where T : notnull
+    {
+        lock (_cacheLock)
+        {
+            var now = DateTime.UtcNow;
+            double cacheValidityMs = 1000.0 / FrameRateHz;
+            
+            if (_cachedResult is T cachedData && (now - _cacheTimestamp).TotalMilliseconds < cacheValidityMs)
+            {
+                return cachedData;
+            }
+            
+            var newData = compute();
+            _cachedResult = newData;
+            _cacheTimestamp = DateTime.UtcNow;
+            return newData;
+        }
+    }
 }
 
 /// <summary>
@@ -256,25 +279,7 @@ public abstract class II2CDistanceSensor : II2CDevice
         if (!Initialized)
             throw new InvalidOperationException("Sensor not initialized. Call Initialize() first.");
 
-        lock (_cacheLock)
-        {
-            var now = DateTime.UtcNow;
-            double cacheValidityMs = 1000.0 / FrameRateHz;
-            
-            if (_cachedResult is List<(int distMM, float confidence)> cachedData && (now - _cacheTimestamp).TotalMilliseconds < cacheValidityMs)
-            {
-                // Return a copy of the cached list to prevent external modifications
-                return new List<(int distMM, float confidence)>(cachedData);
-            }
-
-            // Cache is invalid or missing, read new data
-            var newData = ReadOnceInternal(TimeoutMs, token);
-            _cachedResult = newData;
-            _cacheTimestamp = DateTime.UtcNow;
-            
-            // Return a copy of the newly cached data
-            return new List<(int distMM, float confidence)>(newData);
-        }
+        return GetCachedOrCompute(() => ReadOnceInternal(TimeoutMs, token));
     }
 
     /// <summary>
@@ -335,7 +340,6 @@ public abstract class II2CThermalSensor : II2CDevice
 
         lock (_cacheLock)
         {
-            // Check if cached data is still valid based on FrameRateHz
             var now = DateTime.UtcNow;
             double cacheValidityMs = 1000.0 / FrameRateHz;
             
@@ -451,23 +455,7 @@ public abstract class II2CHumanPresenceSensor : II2CDevice
         if (!Initialized)
             throw new InvalidOperationException("Sensor not initialized. Call Initialize() first.");
 
-        lock (_cacheLock)
-        {
-            var now = DateTime.UtcNow;
-            double cacheValidityMs = 1000.0 / FrameRateHz;
-            
-            if (_cachedResult is PresenceMeasurement cachedData && (now - _cacheTimestamp).TotalMilliseconds < cacheValidityMs)
-            {
-                return cachedData;
-            }
-
-            // Cache is invalid or missing, read new data
-            var newData = ReadOnceInternal(TimeoutMs, token);
-            _cachedResult = newData;
-            _cacheTimestamp = DateTime.UtcNow;
-            
-            return newData;
-        }
+        return GetCachedOrCompute(() => ReadOnceInternal(TimeoutMs, token));
     }
 
     /// <summary>
