@@ -37,6 +37,27 @@ public abstract class II2CDevice (int address)
     protected virtual I2C.TransferMode PreferredTransferMode => I2C.TransferMode.Auto;
 
     /// <summary>
+    /// Frame rate in Hz for caching purposes.
+    /// If not overridden by derived classes, defaults to 10 Hz.
+    /// </summary>
+    public virtual float FrameRateHz { get; protected set; } = 10.0f;
+
+    /// <summary>
+    /// Cached measurement result to avoid duplicate reads within the same frame period.
+    /// </summary>
+    protected object? _cachedResult = null;
+    
+    /// <summary>
+    /// Timestamp of the last cached result.
+    /// </summary>
+    protected DateTime _cacheTimestamp = DateTime.MinValue;
+    
+    /// <summary>
+    /// Lock for thread-safe cache access.
+    /// </summary>
+    protected readonly Lock _cacheLock = new();
+
+    /// <summary>
     /// Associated I2C instance for the device. Throws if not initialized.
     /// </summary>
     public I2C I2C { 
@@ -155,6 +176,41 @@ public abstract class II2CDevice (int address)
     {
         return HashCode.Combine(Address, Name);
     }
+
+    /// <summary>
+    /// Helper method to check if cached result is still valid based on frame rate.
+    /// </summary>
+    protected bool IsCacheValid()
+    {
+        lock (_cacheLock)
+        {
+            double cacheValidityMs = 1000.0 / FrameRateHz;
+            return _cachedResult != null && (DateTime.UtcNow - _cacheTimestamp).TotalMilliseconds < cacheValidityMs;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to update the cached result and timestamp.
+    /// </summary>
+    protected void UpdateCache(object? result)
+    {
+        lock (_cacheLock)
+        {
+            _cachedResult = result;
+            _cacheTimestamp = DateTime.UtcNow;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to get the current cached result.
+    /// </summary>
+    protected object? GetCachedResult()
+    {
+        lock (_cacheLock)
+        {
+            return _cachedResult;
+        }
+    }
 }
 
 /// <summary>
@@ -173,28 +229,66 @@ public abstract class II2CDistanceSensor : II2CDevice
     /// Sensor specifications configuration.
     /// </summary>
     public record Specifications(int Width, int Height, float UpdateRateHz, float VerticalFOVDeg, float HorizontalFOVDeg);
-    // Get the current sensor specifications (e.g. for point cloud projection)
+    
+    /// <summary>
+    /// Get the current sensor specifications (e.g. for point cloud projection)
+    /// </summary>
     public abstract Specifications CurrentSpecifications();
-    /// <summary> Read a single measurement from the sensor, returning a list of (distance in mm, confidence) tuples. </summary>
+
+    /// <summary>
+    /// Override FrameRateHz to use the distance sensor's UpdateRateHz from specifications.
+    /// </summary>
+    public override float FrameRateHz
+    {
+        get => CurrentSpecifications().UpdateRateHz;
+        protected set { } // Ignore sets, always use specs
+    }
+
+    /// <summary> 
+    /// Read a single measurement from the sensor, returning a list of (distance in mm, confidence) tuples.
+    /// Uses caching to avoid multiple I2C reads within the same frame period.
+    /// </summary>
     /// <param name="TimeoutMs">Maximum time to wait for a measurement in milliseconds (default: 1000ms).</param>
     /// <param name="token">Optional cancellation token.</param>
     /// <returns>A list of (distance in mm, confidence) tuples representing the sensor measurement.</returns>
-    public abstract List<(int distMM, float confidence)> ReadOnce(int TimeoutMs = 1000, CancellationToken token = default);
+    public List<(int distMM, float confidence)> ReadOnce(int TimeoutMs = 1000, CancellationToken token = default)
+    {
+        if (!Initialized)
+            throw new InvalidOperationException("Sensor not initialized. Call Initialize() first.");
+
+        lock (_cacheLock)
+        {
+            var now = DateTime.UtcNow;
+            double cacheValidityMs = 1000.0 / FrameRateHz;
+            
+            if (_cachedResult is List<(int distMM, float confidence)> cachedData && (now - _cacheTimestamp).TotalMilliseconds < cacheValidityMs)
+            {
+                // Return a copy of the cached list to prevent external modifications
+                return new List<(int distMM, float confidence)>(cachedData);
+            }
+
+            // Cache is invalid or missing, read new data
+            var newData = ReadOnceInternal(TimeoutMs, token);
+            _cachedResult = newData;
+            _cacheTimestamp = DateTime.UtcNow;
+            
+            // Return a copy of the newly cached data
+            return new List<(int distMM, float confidence)>(newData);
+        }
+    }
+
+    /// <summary>
+    /// Internal method to read distance data directly from the sensor.
+    /// Implementors should provide the actual sensor reading logic here.
+    /// </summary>
+    /// <param name="TimeoutMs">Maximum time to wait for a measurement in milliseconds.</param>
+    /// <param name="token">Optional cancellation token.</param>
+    /// <returns>A list of (distance in mm, confidence) tuples.</returns>
+    protected abstract List<(int distMM, float confidence)> ReadOnceInternal(int TimeoutMs = 1000, CancellationToken token = default);
 }
 
-/// <summary>
-/// Base class for I2C thermal sensors.
-/// </summary>
-/// <remarks>
-/// Implementors should provide sensor specifications in <see cref="CurrentSpecifications"/> and implement measurement logic in <see cref="ReadOnce"/>.
-/// </remarks>
 public abstract class II2CThermalSensor : II2CDevice
 {
-    // Cache for concurrent access
-    private float[,]? _cachedData = null;
-    private DateTime _cacheTimestamp = DateTime.MinValue;
-    private readonly object _cacheLock = new object();
-
     public II2CThermalSensor(int address) : base(address)
     {
         Type = DeviceType.Thermal;
@@ -217,6 +311,15 @@ public abstract class II2CThermalSensor : II2CDevice
     /// Get the current sensor specifications.
     /// </summary>
     public abstract Specifications CurrentSpecifications();
+
+    /// <summary>
+    /// Override FrameRateHz to use the thermal sensor's UpdateRateHz from specifications.
+    /// </summary>
+    public override float FrameRateHz
+    {
+        get => CurrentSpecifications().UpdateRateHz;
+        protected set { } // Ignore sets, always use specs
+    }
     
     /// <summary>
     /// Read a single thermal measurement from the sensor, returning a 2D array of temperatures in Celsius.
@@ -232,28 +335,27 @@ public abstract class II2CThermalSensor : II2CDevice
 
         lock (_cacheLock)
         {
-            var specs = CurrentSpecifications();
-            
-            // Calculate cache validity period based on frame rate
-            double cacheValidityMs = 1000.0 / specs.UpdateRateHz;
-            
-            // Check if cached data is still valid
+            // Check if cached data is still valid based on FrameRateHz
             var now = DateTime.UtcNow;
-            if (_cachedData != null && (now - _cacheTimestamp).TotalMilliseconds < cacheValidityMs)
+            double cacheValidityMs = 1000.0 / FrameRateHz;
+            
+            if (_cachedResult is float[,] cachedData && (now - _cacheTimestamp).TotalMilliseconds < cacheValidityMs)
             {
                 // Return a copy of the cached data to prevent external modifications
-                var result = new float[specs.Height, specs.Width];
-                Array.Copy(_cachedData, result, _cachedData.Length);
+                var result = new float[cachedData.GetLength(0), cachedData.GetLength(1)];
+                Array.Copy(cachedData, result, cachedData.Length);
                 return result;
             }
 
             // Cache is invalid or missing, read new data
-            _cachedData = ReadOnceInternal(TimeoutMs, token);
+            var specs = CurrentSpecifications();
+            var newData = ReadOnceInternal(TimeoutMs, token);
+            _cachedResult = newData;
             _cacheTimestamp = DateTime.UtcNow;
             
             // Return a copy of the newly cached data
             var freshResult = new float[specs.Height, specs.Width];
-            Array.Copy(_cachedData, freshResult, _cachedData.Length);
+            Array.Copy(newData, freshResult, newData.Length);
             return freshResult;
         }
     }
@@ -329,12 +431,53 @@ public abstract class II2CHumanPresenceSensor : II2CDevice
     public abstract Specifications CurrentSpecifications();
 
     /// <summary>
+    /// Override FrameRateHz to use the human presence sensor's UpdateRateHz from specifications.
+    /// </summary>
+    public override float FrameRateHz
+    {
+        get => CurrentSpecifications().UpdateRateHz;
+        protected set { } // Ignore sets, always use specs
+    }
+
+    /// <summary>
     /// Read a single presence measurement from the sensor.
+    /// Uses caching to avoid multiple readings within the same frame period.
     /// </summary>
     /// <param name="TimeoutMs">Maximum time to wait for a measurement in milliseconds (default: 1000ms).</param>
     /// <param name="token">Optional cancellation token.</param>
     /// <returns>A PresenceMeasurement record containing presence, motion, and temperature data.</returns>
-    public abstract PresenceMeasurement ReadOnce(int TimeoutMs = 1000, CancellationToken token = default);
+    public PresenceMeasurement ReadOnce(int TimeoutMs = 1000, CancellationToken token = default)
+    {
+        if (!Initialized)
+            throw new InvalidOperationException("Sensor not initialized. Call Initialize() first.");
+
+        lock (_cacheLock)
+        {
+            var now = DateTime.UtcNow;
+            double cacheValidityMs = 1000.0 / FrameRateHz;
+            
+            if (_cachedResult is PresenceMeasurement cachedData && (now - _cacheTimestamp).TotalMilliseconds < cacheValidityMs)
+            {
+                return cachedData;
+            }
+
+            // Cache is invalid or missing, read new data
+            var newData = ReadOnceInternal(TimeoutMs, token);
+            _cachedResult = newData;
+            _cacheTimestamp = DateTime.UtcNow;
+            
+            return newData;
+        }
+    }
+
+    /// <summary>
+    /// Internal method to read presence data directly from the sensor.
+    /// Implementors should provide the actual sensor reading logic here.
+    /// </summary>
+    /// <param name="TimeoutMs">Maximum time to wait for a measurement in milliseconds.</param>
+    /// <param name="token">Optional cancellation token.</param>
+    /// <returns>A PresenceMeasurement record.</returns>
+    protected abstract PresenceMeasurement ReadOnceInternal(int TimeoutMs = 1000, CancellationToken token = default);
 }
 
 // Fallback class for unknown devices that respond on the bus but do not match any known device signature

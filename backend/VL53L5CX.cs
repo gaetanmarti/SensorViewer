@@ -967,7 +967,7 @@ public class VL53L5CX : II2CDistanceSensor
         throw new TimeoutException("VL53L5CX: Measurement timeout");
     }
 
-    public override List<(int distMM, float confidence)> ReadOnce(int TimeoutMs = 1000, CancellationToken token = default)
+    protected override List<(int distMM, float confidence)> ReadOnceInternal(int TimeoutMs = 1000, CancellationToken token = default)
     {
         if (!Initialized)
             throw new InvalidOperationException("VL53L5CX: Sensor not initialized");

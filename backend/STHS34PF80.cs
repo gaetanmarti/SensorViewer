@@ -232,7 +232,7 @@ public class STHS34PF80 : II2CHumanPresenceSensor
         );
     }
 
-    public override PresenceMeasurement ReadOnce(int TimeoutMs = 1000, CancellationToken token = default)
+    protected override PresenceMeasurement ReadOnceInternal(int TimeoutMs = 1000, CancellationToken token = default)
     {
         if (!Initialized)
             throw new InvalidOperationException($"Device {Name} not initialized");

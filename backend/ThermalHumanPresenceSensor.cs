@@ -91,7 +91,7 @@ public class ThermalHumanPresenceSensor : II2CHumanPresenceSensor
         );
     }
 
-    public override PresenceMeasurement ReadOnce(int TimeoutMs = 1000, CancellationToken token = default)
+    protected override PresenceMeasurement ReadOnceInternal(int TimeoutMs = 1000, CancellationToken token = default)
     {
         if (!Initialized)
             throw new InvalidOperationException("Sensor not initialized. Call Initialize() first.");

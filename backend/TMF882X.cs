@@ -326,7 +326,7 @@ public class TMF882X: II2CDistanceSensor
         throw new TimeoutException("TMF882X: timeout INT");
     }
 
-    public override List<(int distMM, float confidence)> ReadOnce(int TimeoutMs = 1000, CancellationToken token = default)
+    protected override List<(int distMM, float confidence)> ReadOnceInternal(int TimeoutMs = 1000, CancellationToken token = default)
     {
         // Start measure
         I2C.WriteReg(REG_CMD_STAT, CMD_MEASURE, token);
