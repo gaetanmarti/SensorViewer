@@ -190,6 +190,11 @@ public abstract class II2CDistanceSensor : II2CDevice
 /// </remarks>
 public abstract class II2CThermalSensor : II2CDevice
 {
+    // Cache for concurrent access
+    private float[,]? _cachedData = null;
+    private DateTime _cacheTimestamp = DateTime.MinValue;
+    private readonly object _cacheLock = new object();
+
     public II2CThermalSensor(int address) : base(address)
     {
         Type = DeviceType.Thermal;
@@ -215,11 +220,52 @@ public abstract class II2CThermalSensor : II2CDevice
     
     /// <summary>
     /// Read a single thermal measurement from the sensor, returning a 2D array of temperatures in Celsius.
+    /// Uses caching to avoid multiple I2C reads within the same frame period.
     /// </summary>
     /// <param name="TimeoutMs">Maximum time to wait for a measurement in milliseconds (default: 1000ms).</param>
     /// <param name="token">Optional cancellation token.</param>
     /// <returns>A 2D array of temperatures in Celsius. The array dimensions match the sensor specifications (Height x Width).</returns>
-    public abstract float[,] ReadOnce(int TimeoutMs = 1000, CancellationToken token = default);
+    public float[,] ReadOnce(int TimeoutMs = 1000, CancellationToken token = default)
+    {
+        if (!Initialized)
+            throw new InvalidOperationException("Sensor not initialized. Call Initialize() first.");
+
+        lock (_cacheLock)
+        {
+            var specs = CurrentSpecifications();
+            
+            // Calculate cache validity period based on frame rate
+            double cacheValidityMs = 1000.0 / specs.UpdateRateHz;
+            
+            // Check if cached data is still valid
+            var now = DateTime.UtcNow;
+            if (_cachedData != null && (now - _cacheTimestamp).TotalMilliseconds < cacheValidityMs)
+            {
+                // Return a copy of the cached data to prevent external modifications
+                var result = new float[specs.Height, specs.Width];
+                Array.Copy(_cachedData, result, _cachedData.Length);
+                return result;
+            }
+
+            // Cache is invalid or missing, read new data
+            _cachedData = ReadOnceInternal(TimeoutMs, token);
+            _cacheTimestamp = DateTime.UtcNow;
+            
+            // Return a copy of the newly cached data
+            var freshResult = new float[specs.Height, specs.Width];
+            Array.Copy(_cachedData, freshResult, _cachedData.Length);
+            return freshResult;
+        }
+    }
+
+    /// <summary>
+    /// Internal method to read thermal data directly from the sensor.
+    /// Implementors should provide the actual sensor reading logic here.
+    /// </summary>
+    /// <param name="TimeoutMs">Maximum time to wait for a measurement in milliseconds.</param>
+    /// <param name="token">Optional cancellation token.</param>
+    /// <returns>A 2D array of temperatures in Celsius.</returns>
+    protected abstract float[,] ReadOnceInternal(int TimeoutMs = 1000, CancellationToken token = default);
 }
 
 /// <summary>

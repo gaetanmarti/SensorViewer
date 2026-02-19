@@ -155,7 +155,7 @@ public class MLX90640 : II2CThermalSensor
         return _specifications;
     }
 
-    public override float[,] ReadOnce(int TimeoutMs = 1000, CancellationToken token = default)
+    protected override float[,] ReadOnceInternal(int TimeoutMs = 1000, CancellationToken token = default)
     {
         if (!Initialized || _meadowSensor == null)
             throw new InvalidOperationException("Sensor not initialized. Call Initialize() first.");

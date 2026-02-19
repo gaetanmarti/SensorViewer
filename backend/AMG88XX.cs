@@ -37,7 +37,7 @@ public class AMG88xx : II2CThermalSensor
     private const float MaxTemperatureCelsius = 80.0f;
     private const float TemperatureResolutionCelsius = 0.25f;
 
-    private readonly Specifications _specifications;
+    private Specifications _specifications;
     private float _currentFrameRate = DefaultUpdateRateHz;
 
     public AMG88xx(int address = DefaultAddress) : base(address)
@@ -129,6 +129,16 @@ public class AMG88xx : II2CThermalSensor
                 I2C.WriteReg(REG_FRAMERATE, FRAMERATE_10HZ, token);
                 _currentFrameRate = 10.0f;
             }
+            _specifications = new Specifications(
+                SensorWidth,
+                SensorHeight,
+                _currentFrameRate,
+                FieldOfViewDegrees,
+                FieldOfViewDegrees,
+                MinTemperatureCelsius,
+                MaxTemperatureCelsius,
+                TemperatureResolutionCelsius
+            );
 
             Thread.Sleep(100); // Allow sensor to stabilize
 
@@ -145,11 +155,8 @@ public class AMG88xx : II2CThermalSensor
         return _specifications;
     }
 
-    public override float[,] ReadOnce(int TimeoutMs = 1000, CancellationToken token = default)
+    protected override float[,] ReadOnceInternal(int TimeoutMs = 1000, CancellationToken token = default)
     {
-        if (!Initialized)
-            throw new InvalidOperationException("Sensor not initialized. Call Initialize() first.");
-
         try
         {
             var startTime = DateTime.UtcNow;

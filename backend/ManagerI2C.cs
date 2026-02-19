@@ -6,6 +6,12 @@ namespace immensive;
 /// Manager for I2C bus operations
 public class ManagerI2C
 {
+    private const byte VirtualSensorBaseAddress = 0x80; // Base address for virtual sensors (not real I2C addresses)
+
+    private readonly int _busId;
+
+    public Dictionary<int, List<II2CDevice>> Devices {get; private set;} = [];
+
     public ManagerI2C(int busId = 1)
     {
         _busId = busId;
@@ -16,11 +22,26 @@ public class ManagerI2C
         RegisterDevice(new AMG88xx(AMG88xx.AlternateAddress));
         RegisterDevice(new MLX90640()); // Using Meadow.Foundation library
         RegisterDevice(new STHS34PF80());
-    }
-    
-    private readonly int _busId;
 
-    public Dictionary<int, List<II2CDevice>> Devices {get;private set;} = [];
+        // For every detected thermal sensor, we will create a corresponding virtual human presence sensor
+        List<II2CThermalSensor> thermalSensors = [];
+        foreach (var deviceList in Devices.Values)
+            foreach (var device in deviceList)
+                if (device is II2CThermalSensor thermalSensor)
+                    thermalSensors.Add(thermalSensor);
+        foreach (var thermalSensor in thermalSensors)
+            RegisterVirtualHumanPresenceSensor(thermalSensor);
+    }
+
+    // For every detected thermal sensor, we will create a corresponding virtual human presence sensor
+    public void RegisterVirtualHumanPresenceSensor(II2CThermalSensor thermalSensor)
+    {
+        var virtualAddress = thermalSensor.Address + VirtualSensorBaseAddress;
+        var virtualPresenceSensor = new ThermalHumanPresenceSensor(thermalSensor, virtualAddress);
+        RegisterDevice(virtualPresenceSensor);
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+            $"Registered virtual human presence sensor for thermal sensor: {thermalSensor.Name}");
+    }
 
     public void RegisterDevice(II2CDevice device)
     {
@@ -51,6 +72,25 @@ public class ManagerI2C
                         if (device.TryDetect(_busId, token)) {
                             devices.Add(device);
                             found = true;
+                            
+                            // If a thermal sensor is detected, also create a virtual human presence sensor
+                            if (device is II2CThermalSensor thermalSensor)
+                            {
+                                // Find in Devices the virtual presence sensor for this thermal sensor
+                                int virtualAddress = thermalSensor.Address + VirtualSensorBaseAddress;
+                                if (Devices.TryGetValue(virtualAddress, out List<II2CDevice>? virtualDevices))
+                                    foreach (var virtualDevice in virtualDevices) {
+                                        if (virtualDevice is ThermalHumanPresenceSensor presenceSensor && 
+                                            presenceSensor.ThermalSensor == thermalSensor)
+                                        {
+                                            devices.Add(presenceSensor);
+                                            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                                                $"Also detected virtual human presence sensor for thermal sensor: {thermalSensor.Name}");
+                                            break;
+                                        }
+                                    }
+                            }
+                        
                             break;
                         }
                     }
