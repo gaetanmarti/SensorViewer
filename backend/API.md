@@ -116,6 +116,7 @@ Return the list of detected I2C devices with:
   - `"Distance"` - Distance/ToF sensors (VL53L5CX, TMF882X)
   - `"Thermal"` - Thermal/infrared cameras (AMG8833, MLX90640)
   - `"HumanPresence"` - Human presence and motion sensors (STHS34PF80)
+  - `"Environmental"` - Environmental sensors: temperature, humidity, pressure, gas (BME680)
 
 ##### Error responses:
 
@@ -204,6 +205,23 @@ Return the specification record for a sensor at the given I2C address (works wit
 }
 ```
 
+##### Response (200 OK) - Environmental Sensor:
+
+```json
+{
+  "ok": true,
+  "address": 119,
+  "name": "BME680",
+  "type": "Environmental",
+  "specifications": {
+    "hasTemperature": true,
+    "hasHumidity": true,
+    "hasPressure": true,
+    "hasGas": true
+  }
+}
+```
+
 ##### Error responses:
 
 - `400`: Invalid I2C address
@@ -222,6 +240,9 @@ curl -X GET http://localhost:8080/api/i2c/device/0x69/specifications
 
 # Human presence sensor
 curl -X GET http://localhost:8080/api/i2c/device/0x5A/specifications
+
+# Environmental sensor
+curl -X GET http://localhost:8080/api/i2c/device/0x77/specifications
 ```
 
 ---
@@ -321,6 +342,42 @@ The STHS34PF80 sensor uses configurable thresholds and hysteresis to determine w
 These parameters can be configured during sensor initialization via the `config` dictionary.
 The raw values (`presenceValue`, `motionValue`, `ambientShockValue`) are always available regardless of threshold configuration.
 
+##### Response (200 OK) - Environmental Sensor:
+
+```json
+{
+  "ok": true,
+  "address": 119,
+  "name": "BME680",
+  "type": "Environmental",
+  "measurement": {
+    "temperatureCelsius": 24.35,
+    "humidityPercent": 47.82,
+    "pressureHPa": 1013.25,
+    "gasResistanceOhms": 51423,
+    "iaqIndex": 42.5
+  }
+}
+```
+
+Note: For environmental sensors, the measurement includes:
+- `temperatureCelsius`: Ambient temperature in °C
+- `humidityPercent`: Relative humidity in %
+- `pressureHPa`: Barometric pressure in hPa
+- `gasResistanceOhms`: Gas resistance in Ohms (VOC indicator — higher value = cleaner air)
+- `iaqIndex`: Indoor Air Quality index on the **US AQI scale (0–500, lower = better)**, computed from gas resistance and humidity (David Bird / G6EJD algorithm, 75 % gas + 25 % humidity contribution):
+
+  | IAQ range | Category |
+  |-----------|----------|
+  | 0 – 50    | Good |
+  | 51 – 150  | Moderate |
+  | 151 – 175 | Unhealthy for Sensitive Groups |
+  | 176 – 200 | Unhealthy |
+  | 201 – 300 | Very Unhealthy |
+  | 301 – 500 | Hazardous |
+
+Fields are `null` if the sensor does not support that measurement type.
+
 ##### Error responses:
 
 - `400`: Invalid I2C address
@@ -340,8 +397,11 @@ curl -X GET http://localhost:8080/api/i2c/device/0x69/data
 
 # Human presence sensor
 curl -X GET http://localhost:8080/api/i2c/device/0x5A/data
+
+# Environmental sensor
+curl -X GET http://localhost:8080/api/i2c/device/0x77/data
 ```
 
 ---
 
-GMA 2026-02-04
+GMA 2026-03-14

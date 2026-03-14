@@ -22,6 +22,8 @@ public class ManagerI2C
         RegisterDevice(new AMG88xx(AMG88xx.AlternateAddress));
         RegisterDevice(new MLX90640()); // Using Meadow.Foundation library
         RegisterDevice(new STHS34PF80());
+        RegisterDevice(new BME680());
+        RegisterDevice(new BME680(0x76));
 
         // For every detected thermal sensor, we will create a corresponding virtual human presence sensor
         List<II2CThermalSensor> thermalSensors = [];
@@ -219,6 +221,10 @@ public class ManagerI2C
             {
                 specs = presenceSensor.CurrentSpecifications();
             }
+            else if (device is II2CEnvironmentalSensor environmentalSensor)
+            {
+                specs = environmentalSensor.CurrentSpecifications();
+            }
             else
             {
                 return Results.Json(new { ok = false, error = "Device does not support specifications." });
@@ -317,6 +323,30 @@ public class ManagerI2C
                         presenceValue = data.PresenceValue,
                         motionValue = data.MotionValue,
                         ambientShockValue = data.AmbientShockValue
+                    }
+                });
+            }
+            // Handle environmental sensors
+            else if (device is II2CEnvironmentalSensor environmentalSensor)
+            {
+                var envData = environmentalSensor.ReadOnce(token: context.RequestAborted);
+                envData.TryGetValue(II2CEnvironmentalSensor.MeasurementType.Temperature, out float tempC);
+                envData.TryGetValue(II2CEnvironmentalSensor.MeasurementType.Humidity, out float humPct);
+                envData.TryGetValue(II2CEnvironmentalSensor.MeasurementType.Pressure, out float presHPa);
+                envData.TryGetValue(II2CEnvironmentalSensor.MeasurementType.Gas, out float gasOhm);
+                return Results.Json(new
+                {
+                    ok = true,
+                    address = device.Address,
+                    name = device.Name,
+                    type = device.Type.ToString(),
+                    measurement = new
+                    {
+                        temperatureCelsius = envData.ContainsKey(II2CEnvironmentalSensor.MeasurementType.Temperature) ? (float?)MathF.Round(tempC, 2) : null,
+                        humidityPercent    = envData.ContainsKey(II2CEnvironmentalSensor.MeasurementType.Humidity)    ? (float?)MathF.Round(humPct, 2) : null,
+                        pressureHPa        = envData.ContainsKey(II2CEnvironmentalSensor.MeasurementType.Pressure)    ? (float?)MathF.Round(presHPa, 2) : null,
+                        gasResistanceOhms  = envData.ContainsKey(II2CEnvironmentalSensor.MeasurementType.Gas)         ? (float?)MathF.Round(gasOhm, 0) : null,
+                        iaqIndex           = envData.TryGetValue(II2CEnvironmentalSensor.MeasurementType.IAQ, out float iaq) ? (float?)MathF.Round(iaq, 1) : null,
                     }
                 });
             }

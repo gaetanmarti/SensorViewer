@@ -26,6 +26,9 @@ export const POLLING_INTERVALS = {
   
   // I2C human presence sensors polling interval (250ms)
   I2C_HUMAN_PRESENCE_SENSORS: 250,
+
+  // I2C environmental sensors polling interval (1000ms = every 1 second)
+  I2C_ENVIRONMENTAL_SENSORS: 1000,
 };
 
 /**
