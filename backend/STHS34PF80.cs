@@ -39,6 +39,7 @@ public class STHS34PF80 : II2CHumanPresenceSensor
     private const byte REG_PAGE_RW = 0x11;            // Page Read/Write control
     
     // Normal configuration registers (direct access, no func_cfg needed)
+    private const byte REG_SENS_DATA = 0x1D;           // Object temperature sensitivity factor (signed 8-bit): sensitivity = SENS_DATA×16 + 2048
     private const byte REG_AVG_TRIM = 0x1E;           // Averaging config: bits 2:0 = avg_tmos, bits 4:3 = avg_t
     private const byte REG_LPF1 = 0x33;               // Low-pass filter config 1: bits 2:0 = lpf_m, bits 6:4 = lpf_p_m
     private const byte REG_LPF2 = 0x34;               // Low-pass filter config 2: bits 2:0 = lpf_p, bits 6:4 = lpf_a_t
@@ -57,6 +58,9 @@ public class STHS34PF80 : II2CHumanPresenceSensor
     private float _updateRateHz = 15.0f;
     private float _detectionRangeMeters = 4.0f;
     
+    // Object temperature sensitivity (LSB/°C) — read from REG_SENS_DATA during Initialize
+    private float _sensitivity = 2000.0f;
+
     // Thresholds (in 0.01°C units) - Optimized for indoor human detection
     private int _presenceThreshold = 150;      // Default: 1.50°C (more sensitive than 200)
     private int _motionThreshold = 150;        // Default: 1.50°C
@@ -172,6 +176,12 @@ public class STHS34PF80 : II2CHumanPresenceSensor
             return;
         }
 
+        // Read factory-calibrated sensitivity from SENS_DATA (0x1D)
+        // Formula: sensitivity [LSB/°C] = SENS_DATA_signed × 16 + 2048
+        var sensDataRaw = I2C.ReadReg(REG_SENS_DATA, token);
+        _sensitivity = (sbyte)sensDataRaw * 16 + 2048;
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"STHS34PF80: SENS_DATA=0x{sensDataRaw:X2}, sensitivity={_sensitivity:F0} LSB/°C");
+
         // Configure device
         // CTRL1: Set ODR (Output Data Rate) in bits 0-3, BDU (Block Data Update) in bit 4
         byte odrValue = _updateRateHz switch
@@ -278,9 +288,9 @@ public class STHS34PF80 : II2CHumanPresenceSensor
             Thread.Sleep(10);
         }
 
-        // Read temperature values (all values are signed 16-bit integers in LSB = 0.01°C)
+        // Read temperature values (all values are signed 16-bit integers)
         var tAmbientRaw = I2C.ReadRegShort(REG_TAMBIENT_L, I2C.ByteOrder.LittleEndian, token);
-        var tObjectRaw = I2C.ReadRegShort(REG_TOBJECT_L, I2C.ByteOrder.LittleEndian, token);
+        var tObjectRaw  = I2C.ReadRegShort(REG_TOBJECT_L,  I2C.ByteOrder.LittleEndian, token);
         var tPresenceRaw = I2C.ReadRegShort(REG_TPRESENCE_L, I2C.ByteOrder.LittleEndian, token);
         var tMotionRaw = I2C.ReadRegShort(REG_TMOTION_L, I2C.ByteOrder.LittleEndian, token);
         var tAmbShockRaw = I2C.ReadRegShort(REG_TAMB_SHOCK_L, I2C.ByteOrder.LittleEndian, token);
@@ -294,9 +304,10 @@ public class STHS34PF80 : II2CHumanPresenceSensor
 
         // Convert to Celsius (LSB = 0.01°C per datasheet, values are in two's complement)
         float ambientTemp = tAmbientRaw / 100.0f;
-        float objectTempRelative = tObjectRaw / 100.0f;
-        // Object temperature is relative to ambient, so we add them to get absolute temperature
-        float objectTemp = ambientTemp + objectTempRelative;
+        // TOBJECT follows Stefan-Boltzmann linearized around 24°C: it is a delta vs ambient.
+        // AN5867 §3.1: T_object [°C] = T_ambient + TOBJECT_LSB / sensitivity
+        // where sensitivity = SENS_DATA_signed × 16 + 2048 [LSB/°C], read from reg 0x1D.
+        float objectTemp = ambientTemp + tObjectRaw / _sensitivity;
 
         return new PresenceMeasurement(
             PresenceDetected: presenceDetected,

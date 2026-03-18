@@ -85,17 +85,17 @@ public sealed class ScreenVisitorTracker
         public int MaxDistanceMm { get; init; } = 5000;
 
         /// Minimum confidence [0–1] for a cell to enter the detection pipeline.
-        public float MinConfDetect { get; init; } = 0.04f;
+        public float MinConfDetect { get; init; } = 0.06f;
 
         /// Minimum confidence [0–1] for a cell to update the background model.
         /// Between MinConfDetect and MinConfTrack: readings in this band are neither
         /// foreground nor trusted enough to update the background (avoids corrupting
         /// the background model with flickering borderline readings).
-        public float MinConfLearn { get; init; } = 0.06f;
+        public float MinConfLearn { get; init; } = 0.08f;
 
         /// Minimum confidence [0–1] for a cell to be counted as foreground.
         /// Higher than MinConfLearn to reject borderline background readings.
-        public float MinConfTrack { get; init; } = 0.08f;
+        public float MinConfTrack { get; init; } = 0.10f;
 
         /// A cell is foreground when its distance is this many mm *closer* than background.
         /// Must be large enough to clear background noise (~100–150 mm typical).

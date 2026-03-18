@@ -1,3 +1,4 @@
+// Environmental Sensor implementation for BME680 (temperature, humidity, pressure, gas).
 // Hookup guide: https://learn.sparkfun.com/tutorials/sparkfun-environmental-sensor-breakout---bme68x-qwiic-hookup-guide
 // Datasheet: https://cdn.sparkfun.com/assets/8/a/1/c/f/BME680-Datasheet.pdf
 // C# library: https://learn.microsoft.com/en-us/dotnet/api/iot.device.bmxx80.bme680?view=iot-dotnet-latest
