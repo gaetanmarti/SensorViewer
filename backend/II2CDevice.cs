@@ -26,6 +26,7 @@ public abstract class II2CDevice (int address)
         Distance = 1,
         Thermal = 2,
         HumanPresence = 3,
+        Environmental = 4,
     }
 
     /// <summary>
@@ -457,6 +458,97 @@ public abstract class II2CHumanPresenceSensor : II2CDevice
     /// <param name="token">Optional cancellation token.</param>
     /// <returns>A PresenceMeasurement record.</returns>
     protected abstract PresenceMeasurement ReadOnceInternal(int TimeoutMs = 1000, CancellationToken token = default);
+}
+
+/// <summary>
+/// Base class for I2C environmental sensors (e.g. gas, temperature, humidity, pressure).
+/// </summary>
+/// </summary> <remarks>
+/// Implementors should provide sensor specifications in <see cref="CurrentSpecifications"/> and implement measurement logic in <see cref="ReadOnce"/>.
+/// </remarks> 
+
+public abstract class II2CEnvironmentalSensor : II2CDevice
+{
+    public II2CEnvironmentalSensor(int address) : base(address)
+    {
+        Type = DeviceType.Environmental; // Environmental sensors can be of various types, so we keep it as Unknown
+    }
+
+    /// <summary>
+    /// Environmental sensor specifications configuration.
+    /// </summary>
+    /// <param name="HasTemperature">Indicates if the sensor can measure temperature.</param>
+    /// <param name="HasHumidity">Indicates if the sensor can measure humidity.</param>
+    /// <param name="HasPressure">Indicates if the sensor can measure pressure.</param>
+    /// <param name="HasGas">Indicates if the sensor can measure gas.</param>
+    public record Specifications(bool HasTemperature, bool HasHumidity, bool HasPressure, bool HasGas);
+    
+    /// <summary>
+    /// Get the current sensor specifications.
+    /// </summary>
+    public abstract Specifications CurrentSpecifications();
+
+    /// <summary>
+    ///  Read a single environmental measurement from the sensor, returning a dictionary of measurement type to value.
+    /// </summary>
+    public enum MeasurementType {
+        Temperature = 1,
+        Humidity = 2,
+        Pressure = 3,
+        Gas = 4,
+        IAQ = 10, // Indoor Air Quality index
+    }
+
+    /// <summary>
+    /// Read a single environmental measurement from the sensor, returning a dictionary of measurement type to value.
+    /// </summary>
+    /// <param name="TimeoutMs">Maximum time to wait for a measurement in milliseconds (default: 1000ms).</param>
+    /// <param name="token">Optional cancellation token.</param>
+    /// <returns>A dictionary mapping measurement types (e.g. "Temperature") to their corresponding values.</returns>
+    public abstract Dictionary<MeasurementType, float> ReadOnce(int TimeoutMs = 1000, CancellationToken token = default);
+
+    /// <summary>
+    /// Compute an indoor air quality (IAQ) index based on the sensor's gas resistance and humidity measurements.
+    /// This is a simple heuristic based on the algorithm by David Bird (G6EJD).
+    /// Source: https://github.com/G6EJD/BME680-Example/blob/master/ESP32_bme680_CC_demo_02.ino
+    /// <br/><br/>
+    /// The returned value follows the US AQI scale (0–500, lower = better):
+    /// <list type="table">
+    ///   <listheader><term>Range</term><description>Category</description></listheader>
+    ///   <item><term>0 – 50</term>    <description>Good</description></item>
+    ///   <item><term>51 – 150</term>  <description>Moderate</description></item>
+    ///   <item><term>151 – 175</term> <description>Unhealthy for Sensitive Groups</description></item>
+    ///   <item><term>176 – 200</term> <description>Unhealthy</description></item>
+    ///   <item><term>201 – 300</term> <description>Very Unhealthy</description></item>
+    ///   <item><term>301 – 500</term> <description>Hazardous</description></item>
+    /// </list>
+    /// </summary>
+    /// <param name="gasResistanceOhms">Gas resistance measurement in Ohms. Clamped to [5 000, 50 000] Ω.</param>
+    /// <param name="humidityPercent">Relative humidity in percent. Optimum is 38–42 %RH.</param>
+    /// <returns>AQI-scale index (0–500) where 0 is excellent and 500 is hazardous.</returns>
+    public static float CalculateAirQualityIndex(float gasResistanceOhms, float humidityPercent)
+    {
+        // Humidity contribution (25% weight) — optimum range is 38–42 %RH
+        const float humReference = 40f;
+        float humScore;
+        if (humidityPercent >= 38f && humidityPercent <= 42f)
+            humScore = 0.25f * 100f;
+        else if (humidityPercent < 38f)
+            humScore = 0.25f / humReference * humidityPercent * 100f;
+        else
+            humScore = ((-0.25f / (100f - humReference)) * humidityPercent + 0.416666f) * 100f;
+
+        // Gas resistance contribution (75% weight) — clamp to [5 000 Ω, 50 000 Ω]
+        const float gasLower = 5_000f;
+        const float gasUpper = 50_000f;
+        float gas = Math.Clamp(gasResistanceOhms, gasLower, gasUpper);
+        float gasScore = (0.75f / (gasUpper - gasLower) * gas
+                         - gasLower * (0.75f / (gasUpper - gasLower))) * 100f;
+
+        // Combined percentage (0–100, 100 = excellent), then convert to AQI scale (0–500, 0 = excellent)
+        float airQualityPct = Math.Clamp(humScore + gasScore, 0f, 100f);
+        return (100f - airQualityPct) * 5f;
+    }
 }
 
 // Fallback class for unknown devices that respond on the bus but do not match any known device signature
