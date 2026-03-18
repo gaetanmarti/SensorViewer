@@ -23,6 +23,7 @@
   import DistanceSensor from '../components/DistanceSensor.svelte';
   import ThermalSensor from '../components/ThermalSensor.svelte';
   import HumanPresenceSensor from '../components/HumanPresenceSensor.svelte';
+  import HumanDistanceSensor from '../components/HumanDistanceSensor.svelte';
   import EnvironmentalSensor from '../components/EnvironmentalSensor.svelte';
 
   let devices = $state([]);
@@ -79,6 +80,8 @@
         return ThermalSensor;
       case 'humanpresence':
         return HumanPresenceSensor;
+      case 'humandistance':
+        return HumanDistanceSensor;
       case 'environmental':
         return EnvironmentalSensor;
       default:
@@ -138,8 +141,10 @@
             <ThermalSensor {device} />
           {:else if getComponentForDevice(device.type) === HumanPresenceSensor}
             <HumanPresenceSensor {device} />
+          {:else if getComponentForDevice(device.type) === HumanDistanceSensor}
+            <HumanDistanceSensor {device} />
           {:else if getComponentForDevice(device.type) === EnvironmentalSensor}
-          <EnvironmentalSensor {device} />
+            <EnvironmentalSensor {device} />
         {:else}
             <UnknownSensor {device} />
           {/if}

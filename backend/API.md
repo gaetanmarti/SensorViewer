@@ -115,8 +115,13 @@ Return the list of detected I2C devices with:
   - `"Unknown"` - Unrecognized device
   - `"Distance"` - Distance/ToF sensors (VL53L5CX, TMF882X)
   - `"Thermal"` - Thermal/infrared cameras (AMG8833, MLX90640)
-  - `"HumanPresence"` - Human presence and motion sensors (STHS34PF80)
+  - `"HumanPresence"` - Human presence and motion sensors (STHS34PF80, ThermalHumanPresenceSensor)
+  - `"HumanDistance"` - Virtual human detection sensor derived from a distance sensor (DistanceHumanPresenceSensor)
   - `"Environmental"` - Environmental sensors: temperature, humidity, pressure, gas (BME680)
+
+> **Virtual sensors**: When a thermal or distance sensor is detected, a corresponding virtual sensor is automatically created and also returned in this list:
+> - `ThermalHumanPresenceSensor` — created from any `II2CThermalSensor` (address = sensor address + `0x80`)
+> - `DistanceHumanPresenceSensor` — created from any `II2CDistanceSensor` (address = sensor address + `0x80`)
 
 ##### Error responses:
 
@@ -132,7 +137,8 @@ curl -X GET http://localhost:8080/api/i2c/devices
 {"ok":true,"devices":[
   {"address":65,"name":"TMF882X Time-of-Flight Sensor","type":"Distance"},
   {"address":90,"name":"STHS34PF80","type":"HumanPresence"},
-  {"address":105,"name":"AMG8833 Thermal Camera (Grid-EYE)","type":"Thermal"}
+  {"address":105,"name":"AMG8833 Thermal Camera (Grid-EYE)","type":"Thermal"},
+  {"address":193,"name":"Human Distance Sensor (Virtual from TMF882X Time-of-Flight Sensor)","type":"HumanDistance"}
 ]}
 ```
 
@@ -140,7 +146,7 @@ curl -X GET http://localhost:8080/api/i2c/devices
 
 #### `GET /api/i2c/device/{address}/specifications`
 
-Return the specification record for a sensor at the given I2C address (works with distance, thermal, and human presence sensors).
+Return the specification record for a sensor at the given I2C address (works with distance, thermal, and human presence/distance sensors).
 
 ##### Parameters:
 
@@ -163,6 +169,25 @@ Return the specification record for a sensor at the given I2C address (works wit
   }
 }
 ```
+
+##### Response (200 OK) - Virtual Human Distance Sensor:
+
+```json
+{
+  "ok": true,
+  "address": 193,
+  "name": "Human Distance Sensor (Virtual from TMF882X Time-of-Flight Sensor)",
+  "type": "HumanDistance",
+  "specifications": {
+    "updateRateHz": 30,
+    "verticalFOVDeg": 33,
+    "horizontalFOVDeg": 32,
+    "maxRangeMeters": 5.0
+  }
+}
+```
+
+Note: The virtual sensor address is the underlying distance sensor address + `0x80` (e.g. TMF882X at `0x41` → virtual at `0xC1` = 193).
 
 ##### Response (200 OK) - Thermal Sensor:
 
@@ -235,6 +260,9 @@ Return the specification record for a sensor at the given I2C address (works wit
 # Distance sensor
 curl -X GET http://localhost:8080/api/i2c/device/0x41/specifications
 
+# Virtual human distance sensor (TMF882X at 0x41 → virtual at 0xC1)
+curl -X GET http://localhost:8080/api/i2c/device/0xC1/specifications
+
 # Thermal sensor
 curl -X GET http://localhost:8080/api/i2c/device/0x69/specifications
 
@@ -249,7 +277,7 @@ curl -X GET http://localhost:8080/api/i2c/device/0x77/specifications
 
 #### `GET /api/i2c/device/{address}/data`
 
-Return a single measurement from the specified sensor (works with distance, thermal, and human presence sensors).
+Return a single measurement from the specified sensor (works with distance, thermal, and human presence/distance sensors).
 
 ##### Parameters:
 
@@ -269,6 +297,36 @@ Return a single measurement from the specified sensor (works with distance, ther
   ]
 }
 ```
+
+##### Response (200 OK) - Virtual Human Distance Sensor:
+
+```json
+{
+  "ok": true,
+  "address": 193,
+  "name": "Human Distance Sensor (Virtual from TMF882X Time-of-Flight Sensor)",
+  "type": "HumanDistance",
+  "measurement": {
+    "presence": true,
+    "position": {
+      "x": -0.042,
+      "y": 0.015,
+      "z": 1.204,
+      "distance": 1.208
+    },
+    "quality01": 0.871
+  }
+}
+```
+
+Note: For virtual human distance sensors, the measurement includes:
+- `presence`: Boolean — true if a human is detected in the field of view
+- `position`: 3-D coordinates in **metres** relative to the sensor origin (Z = forward axis, X = right, Y = up), or `null` when no human is detected
+  - `x`, `y`, `z`: Cartesian components
+  - `distance`: Euclidean distance $\sqrt{x^2 + y^2 + z^2}$ in metres
+- `quality01`: Detection confidence in `[0, 1]` (0 = no confidence, 1 = maximum confidence)
+
+The virtual sensor address is the underlying distance sensor address + `0x80` (e.g. TMF882X at `0x41` → virtual at `0xC1` = 193).
 
 ##### Response (200 OK) - Thermal Sensor:
 
@@ -392,6 +450,9 @@ Fields are `null` if the sensor does not support that measurement type.
 # Distance sensor
 curl -X GET http://localhost:8080/api/i2c/device/0x41/data
 
+# Virtual human distance sensor (TMF882X at 0x41 → virtual at 0xC1)
+curl -X GET http://localhost:8080/api/i2c/device/0xC1/data
+
 # Thermal sensor
 curl -X GET http://localhost:8080/api/i2c/device/0x69/data
 
@@ -404,4 +465,22 @@ curl -X GET http://localhost:8080/api/i2c/device/0x77/data
 
 ---
 
-GMA 2026-03-14
+### Sensor Configuration Notes
+
+---
+
+#### TMF882X — Range Mode (`shortRange`)
+
+The TMF882X supports two range accuracy modes (§4.2 of the AMS host driver communication note). The mode is selected at initialization time via the `shortRange` config key:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `shortRange` | `bool` | `false` | `true` = short-range accuracy mode (improved precision at close range); `false` = long-range mode (default at firmware startup) |
+| `periodMs` | `ushort` | `34` | Measurement period in milliseconds |
+| `kiloIterations` | `ushort` | `550` | Measurement iterations × 1024 |
+
+The mode is only applied if the firmware reports support (bit 4 of `BUILD_VERSION` register `0x03`). The firmware always starts up in **long-range** mode.
+
+---
+
+GMA 2026-03-18

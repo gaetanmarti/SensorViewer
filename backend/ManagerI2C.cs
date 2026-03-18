@@ -33,6 +33,15 @@ public class ManagerI2C
                     thermalSensors.Add(thermalSensor);
         foreach (var thermalSensor in thermalSensors)
             RegisterVirtualHumanPresenceSensor(thermalSensor);
+
+        // For every detected distance sensor, we will create a corresponding virtual human distance sensor
+        List<II2CDistanceSensor> distanceSensors = [];
+        foreach (var deviceList in Devices.Values)
+            foreach (var device in deviceList)
+                if (device is II2CDistanceSensor distanceSensor)
+                    distanceSensors.Add(distanceSensor);
+        foreach (var distanceSensor in distanceSensors)
+            RegisterVirtualHumanDistanceSensor(distanceSensor);
     }
 
     // For every detected thermal sensor, we will create a corresponding virtual human presence sensor
@@ -43,6 +52,16 @@ public class ManagerI2C
         RegisterDevice(virtualPresenceSensor);
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
             $"Registered virtual human presence sensor for thermal sensor: {thermalSensor.Name}");
+    }
+
+    // For every detected distance sensor, we will create a corresponding virtual human distance sensor
+    public void RegisterVirtualHumanDistanceSensor(II2CDistanceSensor distanceSensor)
+    {
+        var virtualAddress = distanceSensor.Address + VirtualSensorBaseAddress;
+        var virtualDistanceSensor = new DistanceHumanPresenceSensor(distanceSensor, virtualAddress);
+        RegisterDevice(virtualDistanceSensor);
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+            $"Registered virtual human distance sensor for distance sensor: {distanceSensor.Name}");
     }
 
     public void RegisterDevice(II2CDevice device)
@@ -75,22 +94,36 @@ public class ManagerI2C
                             devices.Add(device);
                             found = true;
                             
-                            // If a thermal sensor is detected, also create a virtual human presence sensor
+                            // If a thermal sensor is detected, also add the virtual human presence sensor
                             if (device is II2CThermalSensor thermalSensor)
                             {
-                                // Find in Devices the virtual presence sensor for this thermal sensor
                                 int virtualAddress = thermalSensor.Address + VirtualSensorBaseAddress;
                                 if (Devices.TryGetValue(virtualAddress, out List<II2CDevice>? virtualDevices))
-                                    foreach (var virtualDevice in virtualDevices) {
-                                        if (virtualDevice is ThermalHumanPresenceSensor presenceSensor && 
+                                    foreach (var virtualDevice in virtualDevices)
+                                        if (virtualDevice is ThermalHumanPresenceSensor presenceSensor &&
                                             presenceSensor.ThermalSensor == thermalSensor)
                                         {
                                             devices.Add(presenceSensor);
-                                            CustomLogger.Log(this, CustomLogger.LogLevel.Info, 
+                                            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
                                                 $"Also detected virtual human presence sensor for thermal sensor: {thermalSensor.Name}");
                                             break;
                                         }
-                                    }
+                            }
+
+                            // If a distance sensor is detected, also add the virtual human distance sensor
+                            if (device is II2CDistanceSensor distanceSensor)
+                            {
+                                int virtualAddress = distanceSensor.Address + VirtualSensorBaseAddress;
+                                if (Devices.TryGetValue(virtualAddress, out List<II2CDevice>? virtualDevices))
+                                    foreach (var virtualDevice in virtualDevices)
+                                        if (virtualDevice is DistanceHumanPresenceSensor humanDistanceSensor &&
+                                            humanDistanceSensor.DistanceSensor == distanceSensor)
+                                        {
+                                            devices.Add(humanDistanceSensor);
+                                            CustomLogger.Log(this, CustomLogger.LogLevel.Info,
+                                                $"Also detected virtual human distance sensor for distance sensor: {distanceSensor.Name}");
+                                            break;
+                                        }
                             }
                         
                             break;
@@ -207,9 +240,13 @@ public class ManagerI2C
             if (!TryGetDevice(addr, out var device, context.RequestAborted) || device == null)
                 return Results.NotFound(new { ok = false, error = "Device not found." });
 
-            // Check if device supports specifications (distance, thermal, or human presence sensor)
+            // Check if device supports specifications (distance, thermal, human presence, human distance, or environmental sensor)
             object? specs = null;
-            if (device is II2CDistanceSensor distanceSensor)
+            if (device is II2CHumanDistanceSensor humanDistanceSensor)
+            {
+                specs = humanDistanceSensor.CurrentSpecifications();
+            }
+            else if (device is II2CDistanceSensor distanceSensor)
             {
                 specs = distanceSensor.CurrentSpecifications();
             }
@@ -261,8 +298,32 @@ public class ManagerI2C
             if (!TryGetDevice(addr, out var device, context.RequestAborted) || device == null)
                 return Results.NotFound(new { ok = false, error = "Device not found." });
 
+            // Handle virtual human distance sensors (must be checked before II2CDistanceSensor)
+            if (device is II2CHumanDistanceSensor humanDistanceSensor)
+            {
+                var data = humanDistanceSensor.ReadOnce(token: context.RequestAborted);
+                return Results.Json(new
+                {
+                    ok = true,
+                    address = device.Address,
+                    name = device.Name,
+                    type = device.Type.ToString(),
+                    measurement = new
+                    {
+                        presence = data.Presence,
+                        position = data.Position == null ? null : new
+                        {
+                            x        = MathF.Round(data.Position.X, 3),
+                            y        = MathF.Round(data.Position.Y, 3),
+                            z        = MathF.Round(data.Position.Z, 3),
+                            distance = MathF.Round(data.Position.Distance(), 3),
+                        },
+                        quality01 = MathF.Round(data.Quality01, 3),
+                    }
+                });
+            }
             // Handle distance sensors
-            if (device is II2CDistanceSensor distanceSensor)
+            else if (device is II2CDistanceSensor distanceSensor)
             {
                 var measurement = distanceSensor.ReadOnce(token: context.RequestAborted)
                     .Select(m => new { distMM = m.distMM, confidence = Math.Round(m.confidence, 3) })

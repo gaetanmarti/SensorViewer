@@ -27,6 +27,7 @@ public abstract class II2CDevice (int address)
         Thermal = 2,
         HumanPresence = 3,
         Environmental = 4,
+        HumanDistance = 5,
     }
 
     /// <summary>
@@ -367,7 +368,7 @@ public abstract class II2CThermalSensor : II2CDevice
 }
 
 /// <summary>
-/// Base class for I2C human presence sensors.
+/// Base class for I2C s.
 /// </summary>
 /// <remarks>
 /// Implementors should provide sensor specifications in <see cref="CurrentSpecifications"/> and implement measurement logic in <see cref="ReadOnce"/>.
@@ -549,6 +550,65 @@ public abstract class II2CEnvironmentalSensor : II2CDevice
         float airQualityPct = Math.Clamp(humScore + gasScore, 0f, 100f);
         return (100f - airQualityPct) * 5f;
     }
+}
+
+/// <summary>
+/// Base class for virtual human-presence sensors derived from a distance sensor array.
+/// </summary>
+/// <remarks>
+/// Implementors wrap a <see cref="II2CDistanceSensor"/> and implement the detection
+/// algorithm in <see cref="ReadOnceInternal"/>.
+/// </remarks>
+public abstract class II2CHumanDistanceSensor : II2CDevice
+{
+    protected II2CHumanDistanceSensor(int address) : base(address)
+    {
+        Type = DeviceType.HumanDistance;
+    }
+
+    /// <summary>3-D position in metres relative to the sensor origin (Z = forward).</summary>
+    public record Position(float X, float Y, float Z)
+    {
+        /// <summary>Euclidean distance from the sensor in metres.</summary>
+        public float Distance() => MathF.Sqrt(X * X + Y * Y + Z * Z);
+    }
+
+    /// <summary>Result of one human-detection frame.</summary>
+    /// <param name="Presence">True if a human is detected.</param>
+    /// <param name="Position">3-D position of the detected human, or null when absent.</param>
+    /// <param name="Quality01">Detection confidence in [0, 1].</param>
+    public record HumanDetection(bool Presence, Position? Position, float Quality01);
+
+    /// <summary>Sensor specifications used for frame-rate caching and projection.</summary>
+    public record Specifications(
+        float UpdateRateHz,
+        float VerticalFOVDeg,
+        float HorizontalFOVDeg,
+        float MaxRangeMeters);
+
+    public abstract Specifications CurrentSpecifications();
+
+    public override float FrameRateHz
+    {
+        get => CurrentSpecifications().UpdateRateHz;
+        protected set { }
+    }
+
+    /// <summary>
+    /// Returns the latest human-detection result, using the frame-rate cache.
+    /// </summary>
+    public HumanDetection ReadOnce(int TimeoutMs = 1000, CancellationToken token = default)
+    {
+        if (!Initialized)
+            throw new InvalidOperationException("Sensor not initialized. Call Initialize() first.");
+
+        return GetCachedOrCompute(() => ReadOnceInternal(TimeoutMs, token));
+    }
+
+    /// <summary>
+    /// Internal detection logic, called by <see cref="ReadOnce"/> through the cache.
+    /// </summary>
+    protected abstract HumanDetection ReadOnceInternal(int TimeoutMs = 1000, CancellationToken token = default);
 }
 
 // Fallback class for unknown devices that respond on the bus but do not match any known device signature
