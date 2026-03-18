@@ -9,7 +9,8 @@
  * In development, use empty string to leverage Vite's proxy
  * In production, this would be the full backend URL
  */
-export const API_BASE_URL = import.meta.env.MODE === 'production' ? 'http://192.168.4.50:8080' : '';
+export const API_BASE_URL = import.meta.env.MODE === 'production' ? 
+  import.meta.env.VITE_API_BASE_URL : '';
 
 /**
  * API polling intervals (in milliseconds)

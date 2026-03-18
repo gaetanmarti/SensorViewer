@@ -21,10 +21,10 @@
             }
         },
         {
-            "name": "Remote Launch",
+            "name": "Remote Launch (192.168.4.50)",
             "type": "coreclr",
             "request": "launch",
-            "preLaunchTask": "build and copy",
+            "preLaunchTask": "build and copy direct",
             "program": "~/backend/backend.dll",
             "args": [],
             "cwd": "~/backend",
@@ -35,6 +35,25 @@
                 "pipeProgram": "ssh",
                 "pipeArgs": [
                     "pi@192.168.4.50"
+                ],
+                "debuggerPath": "~/vsdbg/vsdbg"
+            }
+        },
+         {
+            "name": ".NET Remote Launch (imm-xxxx.tail99cfe0.ts.net)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build and copy tailscale",
+            "program": "~/backend/backend.dll",
+            "args": [],
+            "cwd": "~/backend",
+            "stopAtEntry": false,
+            "console": "internalConsole",
+            "pipeTransport": {
+                "pipeCwd": "${workspaceRoot}",
+                "pipeProgram": "ssh",
+                "pipeArgs": [
+                    "pi@imm-xxxx.tail99cfe0.ts.net"
                 ],
                 "debuggerPath": "~/vsdbg/vsdbg"
             }

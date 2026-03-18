@@ -5,8 +5,25 @@
 // Datasheet: https://cdn.sparkfun.com/assets/learn_tutorials/2/2/8/9/TMF882X_DataSheet.pdf
 // Host driver communication: https://look.ams-osram.com/m/5bfe4f6d8a09e607/original/TMF882X-Host-Driver-Communication-AN001015.pdf
 // Firmware images: 
-// 1. https://github.com/uwgraphics/mini_tof_firmware/blob/main/TMF882X/firmware/tmf882x_image.c
-// 2. https://github.com/sparkfun/SparkFun_Qwiic_TMF882X_Arduino_Library/blob/main/src/tof_bin_image.c
+/*
+ TMF8820 / TMF8821
+ =================
+ 
+  * Navigate to https://ams-osram.com/tmf8821
+  * Scroll down to Software dropdown menu
+  * Download TMF882x_Driver_Linux_v3.56.zip
+  * Unzip TMF882x_Driver_Linux_v3.56.zip
+  * The latest firmware file is tmf8x2x_application_4x4.hex
+  
+ TMF8828
+ =======
+ 
+  * Navigate to https://ams-osr§m.com/tmf8828
+  * Scroll down to Software dropdown menu
+  * Download TMF882x_Driver_Linux_v3.56.zip
+  * Unzip TMF882x_Driver_Linux_v3.56.zip
+  * The latest firmware file is tmf8x2x_application_8x8.hex
+*/
 
 namespace immensive;
 
@@ -14,6 +31,8 @@ public class TMF882X: II2CDistanceSensor
 {
     // TMF882X Register addresses
     private const byte REG_APPID = 0x00;
+    private const byte REG_BUILD_VERSION = 0x03; // bit 4 set = short range accuracy supported (§4.2.1)
+    private const byte REG_ACTIVE_RANGE = 0x19;  // 0x6E = short, 0x6F = long, 0x00 = not supported (§4.2.2)
     private const byte REG_CMD_STAT = 0x08;
     private const byte REG_INT_STATUS = 0xE1;
     private const byte REG_ENABLE = 0xE0;
@@ -35,6 +54,8 @@ public class TMF882X: II2CDistanceSensor
     private const byte CMD_MEASURE = 0x10;
     private const byte CMD_WRITE_CONFIG_PAGE = 0x15;
     private const byte CMD_LOAD_CONFIG_PAGE_COMMON = 0x16;
+    private const byte CMD_SHORT_RANGE_ACCURACY = 0x6E; // Switch to short-range mode (§4.2.3)
+    private const byte CMD_LONG_RANGE_ACCURACY = 0x6F;  // Switch to long-range mode (§4.2.3)
     private const byte CMD_RESET = 0xFE;
     private const byte CMD_STOP = 0xFF;
 
@@ -82,9 +103,19 @@ public class TMF882X: II2CDistanceSensor
         Application = 0x03 // Measurement application running
     }
 
+    // See §4.2 Short Range Accuracy Operation
+    public enum RangeMode : byte
+    {
+        Short = CMD_SHORT_RANGE_ACCURACY, // 0x6E – improved accuracy at close range
+        Long  = CMD_LONG_RANGE_ACCURACY,  // 0x6F – default mode at firmware startup
+    }
+
     // See 7.4.1 SPAD Mask and Mode Selection (p.21) for these settings
     const ushort DefaultPeriodMs = 34; // Measurement period in milliseconds
     const ushort DefaultKiloIterations = 550; // Measurement iterations times * 1024
+
+    // See 4.2 Short Range Accuracy Operation
+    const bool DefaultShortRange = false; // Set to true to enable short-range accuracy mode (if supported by firmware)
 
     // Store the current measurement period for frame rate calculation
     private ushort _currentPeriodMs = DefaultPeriodMs;
@@ -151,8 +182,9 @@ public class TMF882X: II2CDistanceSensor
     /// </summary>
     /// <param name="config">A dictionary containing configuration parameters.
     /// Supported keys:
-    /// - "periodMs": Measurement period in milliseconds (default: 50)
+    /// - "periodMs": Measurement period in milliseconds (default: 34)
     /// - "kiloIterations": Measurement iterations times 1024 (default: 550)
+    /// - "shortRange": "true" for short-range accuracy mode, "false" for long-range (default: false)
     /// </param>
     /// <param name="busId">The I2C bus ID. If -1, the default bus is used.</param>
     /// <param name="token">Optional cancellation token.</param>
@@ -179,6 +211,7 @@ public class TMF882X: II2CDistanceSensor
 
         var periodMs = config.TryGetValue("periodMs", out string? value) ? ushort.Parse(value) : DefaultPeriodMs;
         var kiloIterations = config.TryGetValue("kiloIterations", out value) ? ushort.Parse(value) : DefaultKiloIterations;
+        var shortRange = config.TryGetValue("shortRange", out value) ? bool.Parse(value) : DefaultShortRange;
 
         _currentPeriodMs = periodMs;
 
@@ -201,7 +234,48 @@ public class TMF882X: II2CDistanceSensor
         // Commit config
         I2C.WriteReg(REG_CMD_STAT, CMD_WRITE_CONFIG_PAGE, token);
         WaitCmdDone(token: token);
+
+        // Configure range mode (§4.2.2) – only if firmware supports it
+        var rangeMode = GetActiveRange(token);
+        var expectedRangeMode = shortRange ? RangeMode.Short : RangeMode.Long;
+        if (rangeMode.HasValue && rangeMode.Value != expectedRangeMode)
+            SetRange(expectedRangeMode, token);
+    
         Initialized = true;
+    }
+
+    /// <summary>
+    /// Returns true if the current firmware supports short-range accuracy mode.
+    /// Checks bit 4 of register BUILD_VERSION (0x03) as per §4.2.1.
+    /// </summary>
+    public bool SupportsShortRange(CancellationToken token = default)
+    {
+        byte buildVersion = I2C.ReadReg(REG_BUILD_VERSION, token);
+        return (buildVersion & 0x10) != 0;
+    }
+
+    /// <summary>
+    /// Returns the currently active range mode, or null if not supported (§4.2.2).
+    /// </summary>
+    public RangeMode? GetActiveRange(CancellationToken token = default)
+    {
+        byte activeRange = I2C.ReadReg(REG_ACTIVE_RANGE, token);
+        return activeRange switch
+        {
+            CMD_SHORT_RANGE_ACCURACY => RangeMode.Short,
+            CMD_LONG_RANGE_ACCURACY  => RangeMode.Long,
+            _                        => null
+        };
+    }
+
+    /// <summary>
+    /// Switches the range accuracy mode (§4.2.3).
+    /// Must only be called when no measurement is ongoing.
+    /// </summary>
+    public void SetRange(RangeMode mode, CancellationToken token = default)
+    {
+        I2C.WriteReg(REG_CMD_STAT, (byte)mode, token);
+        WaitCmdDone(token: token);
     }
 
     public AppId GetAppId()

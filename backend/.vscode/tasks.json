@@ -18,7 +18,7 @@
             }
         },
 		{
-            "label": "copy",
+            "label": "copy_direct",
             "type": "shell",
             "command": "scp",
             "args": [
@@ -28,11 +28,29 @@
             ]
         },
         {
-            "label": "build and copy",
+            "label": "copy_tailscale",
+            "type": "shell",
+            "command": "scp",
+            "args": [
+                "-r",
+                "${workspaceFolder}/bin/Debug/net9.0/*",
+                "pi@imm-xxxx.tail99cfe0.ts.net:~/backend/"
+            ]
+        },
+         {
+            "label": "build and copy direct",
             "dependsOrder": "sequence",
             "dependsOn": [
                 "build",
-                "copy"
+                "copy_direct"
+            ]
+        },
+		{
+            "label": "build and copy tailscale",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "build",
+                "copy_tailscale"
             ]
         },
     ]

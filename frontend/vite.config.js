@@ -28,7 +28,7 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         '/api': {
-          target: 'http://192.168.4.50:8080',
+          target: env.VITE_API_BASE_URL,
           changeOrigin: true,
           secure: false
         }
