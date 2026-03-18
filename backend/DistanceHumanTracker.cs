@@ -110,8 +110,14 @@ public sealed class ScreenVisitorTracker
         /// Frames without a candidate required to turn presence OFF.
         public int PresenceOffFrames { get; init; } = 8;
 
-        /// Background EMA learning rate (α).  Smaller = slower adaptation to scene changes.
+        /// Background EMA learning rate (α) for non-foreground cells.  Smaller = slower adaptation.
         public float BackgroundLearnRate { get; init; } = 0.02f;
+
+        /// Slow background adoption rate (α) applied even to foreground cells.
+        /// Allows permanent obstacles (e.g. a stored object) to be gradually absorbed
+        /// into the background model.  At 30 Hz, 0.001 ≈ 33 s time constant.
+        /// Set to 0 to disable (background never updates under a detected object).
+        public float BackgroundAdoptRate { get; init; } = 0.01f; // about 20-30s
 
         /// Position EMA smoothing factor (α).  Higher = faster tracking, more jitter.
         public float PositionAlpha { get; init; } = 0.35f;
@@ -225,6 +231,21 @@ public sealed class ScreenVisitorTracker
             _background[i] = _background[i].HasValue
                 ? _cfg.BackgroundLearnRate * distMM + (1f - _cfg.BackgroundLearnRate) * _background[i]!.Value
                 : distMM; // first valid reading seeds the background immediately
+        }
+
+        // ── 2b. Slow background adoption for foreground cells ──────────────────
+        // A cell permanently held as foreground (stored object, fixture) slowly
+        // drifts the background toward the obstacle's distance, so it eventually
+        // stops triggering presence detection.
+        if (_cfg.BackgroundAdoptRate > 0f)
+        {
+            foreach (var (idx, _, _) in foreground)
+            {
+                var (distMM, _) = raw[idx];
+                _background[idx] = _background[idx].HasValue
+                    ? _cfg.BackgroundAdoptRate * distMM + (1f - _cfg.BackgroundAdoptRate) * _background[idx]!.Value
+                    : (float)distMM;
+            }
         }
 
         // ── 3. Candidate stats ─────────────────────────────────────────────────

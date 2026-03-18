@@ -1,6 +1,7 @@
 // Datasheet: https://www.st.com/resource/en/datasheet/sths34pf80.pdf
 // Hookup guide: https://docs.sparkfun.com/SparkFun_Qwiic_Human_Presence_Sensor-STHS34PF80/software_overview/
 // Arduino library: https://github.com/sparkfun/SparkFun_STHS34PF80_Arduino_Library
+// I2c guide: https://www.st.com/resource/en/application_note/an5867-sths34pf80-lowpower-highsensitivity-infrared-ir-sensor-for-presence-and-motion-detection-stmicroelectronics.pdf
 
 namespace immensive;
 
@@ -50,6 +51,7 @@ public class STHS34PF80 : II2CHumanPresenceSensor
     private const byte EMB_HYST_MOTION = 0x2D;        // Motion hysteresis (8-bit)
     private const byte EMB_HYST_TAMB_SHOCK = 0x2E;    // Ambient shock hysteresis (8-bit)
     private const byte EMB_ALGO_CONFIG = 0x28;        // Algorithm config (bit 1: sel_abs, bit 2: comp_type, bit 3: int_pulsed)
+    private const byte EMB_RESET_ALGO = 0x2A;          // Algorithm reset: write 0x01 to reset IIR filters (ALGO_ENABLE_RESET bit 0)
 
     // Configuration
     private float _updateRateHz = 15.0f;
@@ -122,9 +124,42 @@ public class STHS34PF80 : II2CHumanPresenceSensor
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"STHS34PF80: Config - UpdateRate: {_updateRateHz} Hz, Range: {_detectionRangeMeters} m");
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"STHS34PF80: Thresholds - Presence: {_presenceThreshold/100.0:F2}°C, Motion: {_motionThreshold/100.0:F2}°C, Shock: {_ambientShockThreshold/100.0:F2}°C");
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"STHS34PF80: Hysteresis - Presence: {_presenceHysteresis/100.0:F2}°C, Motion: {_motionHysteresis/100.0:F2}°C, Shock: {_ambientShockHysteresis/100.0:F2}°C");
- 
-        // Additional delay for sensor stabilization
-        Thread.Sleep(50);
+
+        // ── Hard reset ─────────────────────────────────────────────────────────
+        // The BOOT bit is only reliable when the sensor is in power-down (ODR = 0).
+        // Sequence: force power-down → BOOT → poll until cleared → flush pipeline.
+
+        // 1. Force power-down (ODR = 0, keep BDU bit if set)
+        var ctrl1Current = I2C.ReadReg(REG_CTRL1, token);
+        I2C.WriteReg(REG_CTRL1, (byte)(ctrl1Current & 0xF0), token);
+        Thread.Sleep(20); // allow the current conversion to finish
+
+        // 2. Issue BOOT (CTRL2 bit 7): reloads all registers from OTP and clears
+        //    the internal algorithm accumulators
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "STHS34PF80: Issuing BOOT (power-down mode)");
+        I2C.WriteReg(REG_CTRL2, 0x80, token);
+
+        // 3. Poll until the BOOT bit self-clears (< 2 ms typical, 500 ms timeout)
+        var bootTimeout = DateTime.UtcNow.AddMilliseconds(500);
+        while (DateTime.UtcNow < bootTimeout)
+        {
+            Thread.Sleep(5);
+            if ((I2C.ReadReg(REG_CTRL2, token) & 0x80) == 0)
+            {
+                CustomLogger.Log(this, CustomLogger.LogLevel.Info, "STHS34PF80: BOOT complete");
+                break;
+            }
+        }
+
+        // 4. Flush the output data pipeline: dummy-read all output registers so
+        //    stale values from the previous run cannot surface on the first ReadOnce()
+        Thread.Sleep(10);
+        I2C.ReadReg(REG_STATUS, token);
+        I2C.ReadRegShort(REG_TAMBIENT_L, I2C.ByteOrder.LittleEndian, token);
+        I2C.ReadRegShort(REG_TOBJECT_L,  I2C.ByteOrder.LittleEndian, token);
+        I2C.ReadRegShort(REG_TPRESENCE_L, I2C.ByteOrder.LittleEndian, token);
+        I2C.ReadRegShort(REG_TMOTION_L,  I2C.ByteOrder.LittleEndian, token);
+        I2C.ReadRegShort(REG_TAMB_SHOCK_L, I2C.ByteOrder.LittleEndian, token);
 
         // Verify WHO_AM_I after reset
         var whoAmI = I2C.ReadReg(REG_WHO_AM_I, token);
@@ -167,51 +202,45 @@ public class STHS34PF80 : II2CHumanPresenceSensor
         I2C.WriteReg(REG_AVG_TRIM, avgTrim, token);
         
         // Configure low-pass filters (LPF1, LPF2 - normal registers, direct access)
-        // LPF_ODR_DIV_50 = 2 for all filters (good balance for human detection)
-        // LPF1: bits 2:0 = lpf_m (motion), bits 6:4 = lpf_p_m (presence/motion)
-        byte lpf1 = (byte)((2 << 4) | 2); // ODR/50 for both
+        // lpf_m=0, lpf_p_m=0, lpf_p=0, lpf_a_t=3 → ODR/9 for motion and presence (fast
+        // response), ODR/100 for ambient temperature (changes very slowly).
+        // Note: ODR/50 was previously used for all filters but was far too sluggish
+        // (0.3 Hz at 15 Hz ODR), causing near-zero presence/motion readings.
+        // LPF1: bits 2:0 = lpf_m, bits 6:4 = lpf_p_m
+        byte lpf1 = (byte)((0 << 4) | 0); // ODR/9 for motion and presence-motion
         I2C.WriteReg(REG_LPF1, lpf1, token);
         
-        // LPF2: bits 2:0 = lpf_p (presence), bits 6:4 = lpf_a_t (ambient temperature)
-        byte lpf2 = (byte)((2 << 4) | 2); // ODR/50 for both
+        // LPF2: bits 2:0 = lpf_p, bits 6:4 = lpf_a_t
+        byte lpf2 = (byte)((3 << 4) | 0); // lpf_a_t=ODR/100 (ambient changes slowly), lpf_p=ODR/9
         I2C.WriteReg(REG_LPF2, lpf2, token);
 
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "STHS34PF80: Configuring embedded algorithm registers");
-        
-        // Configure thresholds in embedded registers (this affects hardware algorithmdetection)
-        // Convert our software thresholds to embedded register format
-        byte[] presenceThsBytes = BitConverter.GetBytes((ushort)_presenceThreshold);
-        if (!BitConverter.IsLittleEndian) Array.Reverse(presenceThsBytes);
-        WriteEmbeddedReg(EMB_PRESENCE_THS, presenceThsBytes, token);
-        
-        byte[] motionThsBytes = BitConverter.GetBytes((ushort)_motionThreshold);
-        if (!BitConverter.IsLittleEndian) Array.Reverse(motionThsBytes);
-        WriteEmbeddedReg(EMB_MOTION_THS, motionThsBytes, token);
-        
-        byte[] ambShockThsBytes = BitConverter.GetBytes((ushort)_ambientShockThreshold);
-        if (!BitConverter.IsLittleEndian) Array.Reverse(ambShockThsBytes);
-        WriteEmbeddedReg(EMB_TAMB_SHOCK_THS, ambShockThsBytes, token);
-        
-        // Configure ALGO_CONFIG: bit 2 = comp_type (ambient temperature compensation)
-        // Note: NOT setting sel_abs (bit 1) as it causes issues with baseline readings
-        // We'll use Math.Abs() in software instead for detection
-        byte algoConfig = (byte)(1 << 2); // comp_type=1, sel_abs=0
-        WriteEmbeddedReg(EMB_ALGO_CONFIG, new[] { algoConfig }, token);
+        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "STHS34PF80: Configuring embedded algorithm registers + resetting algorithm");
 
-        // Reset the embedded presence/motion algorithm (CTRL2 bit 1 = RESET_ALGO).
-        // Required after modifying any embedded threshold or config register —
-        // without it the internal LPF retains stale state and outputs large spurious values.
-        I2C.WriteReg(REG_CTRL2, 0x02, token);
-
-        // Wait for the RESET_ALGO bit to self-clear (hardware clears it when done)
-        var algoResetTimeout = DateTime.UtcNow.AddMilliseconds(200);
-        while (DateTime.UtcNow < algoResetTimeout)
+        // AN5867 §7.4: all embedded register writes (thresholds, algo config, RESET_ALGO)
+        // must happen in a SINGLE FUNC_CFG_ACCESS session. The ODR is restored only once
+        // at the very end — that rising ODR edge is what actually triggers the IIR reset.
+        byte[] presThsBytes = BitConverter.GetBytes((ushort)_presenceThreshold);
+        byte[] motThsBytes  = BitConverter.GetBytes((ushort)_motionThreshold);
+        byte[] ambThsBytes  = BitConverter.GetBytes((ushort)_ambientShockThreshold);
+        if (!BitConverter.IsLittleEndian)
         {
-            var ctrl2 = I2C.ReadReg(REG_CTRL2, token);
-            if ((ctrl2 & 0x02) == 0)
-                break;
-            Thread.Sleep(5);
+            Array.Reverse(presThsBytes);
+            Array.Reverse(motThsBytes);
+            Array.Reverse(ambThsBytes);
         }
+        byte algoConfig = 0x00; // comp_type=0, sel_abs=0
+        // comp_type=1 (ambient compensation) overcorrects during the convergence period
+        // after a clean RESET_ALGO: the compensation model starts at zero and effectively
+        // subtracts the presence signal, resulting in near-zero TPRESENCE for several seconds.
+
+        WriteEmbeddedRegs(
+            token,
+            (EMB_PRESENCE_THS,  presThsBytes),
+            (EMB_MOTION_THS,    motThsBytes),
+            (EMB_TAMB_SHOCK_THS, ambThsBytes),
+            (EMB_ALGO_CONFIG,   new[] { algoConfig }),
+            (EMB_RESET_ALGO,    new byte[] { 0x01 })   // must be last, triggers reset on ODR restore
+        );
 
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "STHS34PF80: Initialization complete");
         Initialized = true;
@@ -282,43 +311,41 @@ public class STHS34PF80 : II2CHumanPresenceSensor
     }
 
     /// <summary>
-    /// Write to embedded function registers using the func_cfg access sequence.
-    /// Based on ST's sths34pf80_func_cfg_write() implementation.
+    /// Writes multiple embedded function registers in a single FUNC_CFG_ACCESS session
+    /// (AN5867 §7.4). ODR is saved, set to 0, all registers written, then ODR restored
+    /// once at the end — the rising ODR edge triggers any pending RESET_ALGO.
     /// </summary>
-    /// <param name="embeddedRegAddress">Embedded register address (e.g., EMB_PRESENCE_THS)</param>
-    /// <param name="data">Data bytes to write</param>
-    /// <param name="token">Cancellation token</param>
-    private void WriteEmbeddedReg(byte embeddedRegAddress, byte[] data, CancellationToken token = default)
+    private void WriteEmbeddedRegs(CancellationToken token, params (byte addr, byte[] data)[] entries)
     {
-        // 1. Save current ODR and enter Power-Down mode
+        // 1. Save current ODR and enter power-down
         var ctrl1 = I2C.ReadReg(REG_CTRL1, token);
-        var savedOdr = (byte)(ctrl1 & 0x0F); // ODR is in bits 0-3
-        I2C.WriteReg(REG_CTRL1, (byte)(ctrl1 & 0xF0), token); // Clear ODR to enter PD mode
-        
-        Thread.Sleep(10); // Allow sensor to enter PD mode
+        var savedOdr = (byte)(ctrl1 & 0x0F);
+        I2C.WriteReg(REG_CTRL1, (byte)(ctrl1 & 0xF0), token);
+        Thread.Sleep(10);
 
-        // 2. Enable access to embedded functions (CTRL2 bit 4 = FUNC_CFG_ACCESS)
+        // 2. Enable embedded function access
         var ctrl2 = I2C.ReadReg(REG_CTRL2, token);
-        I2C.WriteReg(REG_CTRL2, (byte)(ctrl2 | 0x10), token); // Set bit 4
-        
-        // 3. Enable write mode (PAGE_RW bit 6 = FUNC_CFG_WRITE)
-        I2C.WriteReg(REG_PAGE_RW, 0x40, token); // Set FUNC_CFG_WRITE bit
-        
-        // 4. Write each byte to embedded register
-        for (int i = 0; i < data.Length; i++)
+        I2C.WriteReg(REG_CTRL2, (byte)(ctrl2 | 0x10), token);
+
+        // 3. Enable write mode
+        I2C.WriteReg(REG_PAGE_RW, 0x40, token);
+
+        // 4. Write all registers (address auto-increments after each FUNC_CFG_DATA write)
+        foreach (var (addr, data) in entries)
         {
-            I2C.WriteReg(REG_FUNC_CFG_ADDR, (byte)(embeddedRegAddress + i), token); // Set address
-            I2C.WriteReg(REG_FUNC_CFG_DATA, data[i], token); // Write data
+            I2C.WriteReg(REG_FUNC_CFG_ADDR, addr, token);
+            foreach (var b in data)
+                I2C.WriteReg(REG_FUNC_CFG_DATA, b, token);
         }
-        
+
         // 5. Disable write mode
-        I2C.WriteReg(REG_PAGE_RW, 0x00, token); // Clear all bits
-        
-        // 6. Disable access to embedded functions
+        I2C.WriteReg(REG_PAGE_RW, 0x00, token);
+
+        // 6. Disable embedded function access
         ctrl2 = I2C.ReadReg(REG_CTRL2, token);
-        I2C.WriteReg(REG_CTRL2, (byte)(ctrl2 & ~0x10), token); // Clear bit 4
-        
-        // 7. Restore ODR
+        I2C.WriteReg(REG_CTRL2, (byte)(ctrl2 & ~0x10), token);
+
+        // 7. Restore ODR — this rising edge triggers RESET_ALGO if it was written
         ctrl1 = I2C.ReadReg(REG_CTRL1, token);
         I2C.WriteReg(REG_CTRL1, (byte)((ctrl1 & 0xF0) | savedOdr), token);
     }
