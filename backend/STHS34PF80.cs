@@ -288,9 +288,9 @@ public class STHS34PF80 : II2CHumanPresenceSensor
         // Calculate detection flags by comparing raw values to configured thresholds
         // Using hysteresis to prevent oscillations: once detected, value must drop below (threshold - hysteresis) to clear
         // Note: We use absolute value for comparison since signatures can be negative or positive
-        bool presenceDetected = Math.Abs(tPresenceRaw) >= _presenceThreshold;
-        bool motionDetected = Math.Abs(tMotionRaw) >= _motionThreshold;
-        bool ambientShockDetected = Math.Abs(tAmbShockRaw) >= _ambientShockThreshold;
+        bool presenceDetected = /*Math.Abs*/(tPresenceRaw) >= _presenceThreshold;
+        bool motionDetected = /*Math.Abs*/(tMotionRaw) >= _motionThreshold;
+        bool ambientShockDetected = /*Math.Abs*/(tAmbShockRaw) >= _ambientShockThreshold;
 
         // Convert to Celsius (LSB = 0.01°C per datasheet, values are in two's complement)
         float ambientTemp = tAmbientRaw / 100.0f;
