@@ -9,8 +9,10 @@
  * In development, use empty string to leverage Vite's proxy
  * In production, this would be the full backend URL
  */
-export const API_BASE_URL = import.meta.env.MODE === 'production' ? 
-  import.meta.env.VITE_API_BASE_URL : '';
+// Use the configured URL when provided (cross-origin setups), otherwise fall back
+// to an empty string so all API calls use relative URLs — this works both with
+// Vite's dev proxy and with same-origin production servers (e.g. embedded .NET).
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 /**
  * API polling intervals (in milliseconds)

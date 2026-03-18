@@ -122,24 +122,7 @@ public class STHS34PF80 : II2CHumanPresenceSensor
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"STHS34PF80: Config - UpdateRate: {_updateRateHz} Hz, Range: {_detectionRangeMeters} m");
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"STHS34PF80: Thresholds - Presence: {_presenceThreshold/100.0:F2}°C, Motion: {_motionThreshold/100.0:F2}°C, Shock: {_ambientShockThreshold/100.0:F2}°C");
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, $"STHS34PF80: Hysteresis - Presence: {_presenceHysteresis/100.0:F2}°C, Motion: {_motionHysteresis/100.0:F2}°C, Shock: {_ambientShockHysteresis/100.0:F2}°C");
-
-        // Reset device
-        CustomLogger.Log(this, CustomLogger.LogLevel.Info, "STHS34PF80: Performing software reset (BOOT)");
-        I2C.WriteReg(REG_CTRL2, 0x80, token); // BOOT bit (bit 7) - reboot memory content
-        
-        // Wait for BOOT bit to return to 0 (reset complete)
-        var bootTimeout = DateTime.UtcNow.AddSeconds(1);
-        while (DateTime.UtcNow < bootTimeout)
-        {
-            var ctrl2 = I2C.ReadReg(REG_CTRL2, token);
-            if ((ctrl2 & 0x80) == 0) // BOOT bit cleared
-            {
-                CustomLogger.Log(this, CustomLogger.LogLevel.Info, "STHS34PF80: Software reset complete");
-                break;
-            }
-            Thread.Sleep(10);
-        }
-        
+ 
         // Additional delay for sensor stabilization
         Thread.Sleep(50);
 
@@ -214,6 +197,21 @@ public class STHS34PF80 : II2CHumanPresenceSensor
         // We'll use Math.Abs() in software instead for detection
         byte algoConfig = (byte)(1 << 2); // comp_type=1, sel_abs=0
         WriteEmbeddedReg(EMB_ALGO_CONFIG, new[] { algoConfig }, token);
+
+        // Reset the embedded presence/motion algorithm (CTRL2 bit 1 = RESET_ALGO).
+        // Required after modifying any embedded threshold or config register —
+        // without it the internal LPF retains stale state and outputs large spurious values.
+        I2C.WriteReg(REG_CTRL2, 0x02, token);
+
+        // Wait for the RESET_ALGO bit to self-clear (hardware clears it when done)
+        var algoResetTimeout = DateTime.UtcNow.AddMilliseconds(200);
+        while (DateTime.UtcNow < algoResetTimeout)
+        {
+            var ctrl2 = I2C.ReadReg(REG_CTRL2, token);
+            if ((ctrl2 & 0x02) == 0)
+                break;
+            Thread.Sleep(5);
+        }
 
         CustomLogger.Log(this, CustomLogger.LogLevel.Info, "STHS34PF80: Initialization complete");
         Initialized = true;

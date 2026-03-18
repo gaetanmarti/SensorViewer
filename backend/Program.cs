@@ -85,7 +85,7 @@ public class Program
         // Root endpoint (for captive portal)
         // ==================================
 
-        /*
+        
             app.MapGet("/", () =>
             {
                 const string html = """
@@ -110,6 +110,7 @@ public class Program
                 return Results.Content(html, "text/html; charset=utf-8");
             });
        
+        /*
             IResult RedirectToPortal() =>
                 Results.Redirect("/webapp/index.html", permanent: false);
             // Apple

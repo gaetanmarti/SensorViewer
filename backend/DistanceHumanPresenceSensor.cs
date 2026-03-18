@@ -22,6 +22,9 @@ public class DistanceHumanPresenceSensor : II2CHumanDistanceSensor
     private HumanDetection _lastDetection;
     private DateTime _lastUpdateTime = DateTime.MinValue;
 
+    // --- Tracker ---
+    private ScreenVisitorTracker? _tracker;
+
     /// <param name="distanceSensor">Underlying distance sensor (must be initialised before use).</param>
     /// <param name="virtualAddress">Virtual I2C address assigned to this sensor instance.</param>
     public DistanceHumanPresenceSensor(II2CDistanceSensor distanceSensor, int virtualAddress)
@@ -44,6 +47,11 @@ public class DistanceHumanPresenceSensor : II2CHumanDistanceSensor
         {
             _i2c = DistanceSensor.I2C;
             Initialized = true;
+
+            var specs = DistanceSensor.CurrentSpecifications();
+            _ = specs; // ScreenVisitorTracker reads specs internally
+            _tracker = new ScreenVisitorTracker(DistanceSensor);
+
             StartProcessingThread();
         }
         else
@@ -114,9 +122,8 @@ public class DistanceHumanPresenceSensor : II2CHumanDistanceSensor
             {
                 try
                 {
-                    var pixels = DistanceSensor.ReadOnce(delayMs * 2, token);
-                    var specs  = DistanceSensor.CurrentSpecifications();
-                    var detection = Update(pixels, specs);
+                    var state = _tracker!.Update(delayMs * 2, token);
+                    var detection = ToHumanDetection(state);
 
                     lock (_dataLock)
                     {
@@ -152,79 +159,19 @@ public class DistanceHumanPresenceSensor : II2CHumanDistanceSensor
     }
 
     // -------------------------------------------------------------------------
-    // Detection algorithm (placeholder)
+    // PersonState → HumanDetection conversion
     // -------------------------------------------------------------------------
 
-    /// <summary>
-    /// Processes one frame of distance pixels and returns a human detection result.
-    /// </summary>
-    /// <remarks>
-    /// Current implementation is a placeholder:
-    ///   • filters pixels below a confidence threshold
-    ///   • picks the closest valid pixel as the candidate
-    ///   • projects it to a 3-D position using the sensor FoV
-    ///
-    /// TODO: replace with a proper algorithm, e.g.:
-    ///   1. Pixel clustering by depth proximity
-    ///   2. Silhouette classification (size / shape heuristics)
-    ///   3. Multi-frame temporal tracking for presence stability
-    /// </remarks>
-    private static HumanDetection Update(
-        List<(int distMM, float confidence)> pixels,
-        II2CDistanceSensor.Specifications specs)
+    private static HumanDetection ToHumanDetection(PersonState state)
     {
-        const float MinConfidence = 0.3f;
-        const float MaxRangeMm   = 5_000f; // 5 m
+        if (!state.Presence || state.SmoothedPositionMm is null)
+            return new HumanDetection(false, null, state.Quality01);
 
-        int   bestIndex = -1;
-        int   bestDist  = int.MaxValue;
-        float bestConf  = 0f;
-
-        for (int i = 0; i < pixels.Count; i++)
-        {
-            var (distMM, conf) = pixels[i];
-            if (conf < MinConfidence || distMM <= 0 || distMM > MaxRangeMm)
-                continue;
-
-            if (distMM < bestDist)
-            {
-                bestDist  = distMM;
-                bestConf  = conf;
-                bestIndex = i;
-            }
-        }
-
-        if (bestIndex < 0)
-            return new HumanDetection(false, null, 0f);
-
-        var position = ProjectPixel(bestIndex, bestDist, specs);
-        return new HumanDetection(true, position, bestConf);
-    }
-
-    /// <summary>
-    /// Projects a pixel index and distance to a 3-D position (Z = forward axis).
-    /// </summary>
-    private static Position ProjectPixel(int index, int distMM, II2CDistanceSensor.Specifications specs)
-    {
-        float distM = distMM / 1000f;
-        float hFovRad = specs.HorizontalFOVDeg * MathF.PI / 180f;
-        float vFovRad = specs.VerticalFOVDeg    * MathF.PI / 180f;
-
-        int cols = specs.Width;
-        int rows = specs.Height;
-
-        int col = index % cols;
-        int row = index / cols;
-
-        // Angular offset from sensor boresight
-        float angleH = cols > 1 ? (col - (cols - 1) / 2f) / (cols - 1) * hFovRad : 0f;
-        float angleV = rows > 1 ? (row - (rows - 1) / 2f) / (rows - 1) * vFovRad : 0f;
-
-        // Spherical → Cartesian  (Z forward, X right, Y up)
-        float z = distM * MathF.Cos(angleH) * MathF.Cos(angleV);
-        float x = distM * MathF.Sin(angleH);
-        float y = distM * MathF.Sin(angleV);
-
-        return new Position(x, y, z);
+        var p = state.SmoothedPositionMm.Value;
+        // HumanTracker works in mm; Position is in metres
+        return new HumanDetection(
+            true,
+            new Position(p.X / 1000f, p.Y / 1000f, p.Z / 1000f),
+            state.Quality01);
     }
 }
